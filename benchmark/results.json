@@ -1,0 +1,20 @@
+[
+  {
+    "task": "Factual Speed",
+    "duration_sec": 0.36,
+    "success": true,
+    "status": "PASS"
+  },
+  {
+    "task": "Architecture Map",
+    "duration_sec": 0.25,
+    "success": true,
+    "status": "PASS"
+  },
+  {
+    "task": "SPA Synthesis",
+    "duration_sec": 0.26,
+    "success": true,
+    "status": "PASS"
+  }
+]

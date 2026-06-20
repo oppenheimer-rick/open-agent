@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitcoin vs Ethereum — Interactive Comparison</title>
+<style>
+  :root {
+    --btc-color: #f7931a;
+    --eth-color: #627fb5;
+    --bg: #1a1a2e;
+    --card-bg: #16213e;
+    --text: #e0e0e0;
+    --accent: #00d4ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem;
+  }
+  h1 {
+    text-align: center;
+    font-size: 2.5rem;
+    margin-bottom: .3rem;
+    background: linear-gradient(90deg, var(--btc-color), var(--eth-color));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    text-align: center;
+    color: #888;
+    margin-bottom: 2rem;
+    font-size: .95rem;
+  }
+  /* --- Header Cards --- */
+  .header-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 1.5rem;
+    max-width: 960px;
+    margin: 0 auto 2.5rem;
+  }
+  .coin-card {
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 1.8rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform .3s, box-shadow .3s;
+  }
+  .coin-card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+  .coin-card::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 180px; height: 180px;
+    border-radius: 50%;
+    opacity: .15;
+  }
+  .btc::before { background: var(--btc-color); }
+  .eth::before { background: var(--eth-color); }
+  .coin-icon { font-size: 3rem; margin-bottom: .5rem; }
+  .coin-card h2 { font-size: 1.6rem; margin-bottom: .3rem; }
+  .btc h2 { color: var(--btc-color); }
+  .eth h2 { color: var(--eth-color); }
+  .stat-row { display: flex; justify-content: space-between; padding: .5rem 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: #aaa; font-size: .88rem; }
+  .stat-value { font-weight: 600; font-size: .95rem; }
+
+  /* --- Section Titles --- */
+  .section-title {
+    text-align: center;
+    font-size: 1.3rem;
+    margin: 2.5rem 0 1rem;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+
+  /* --- Comparison Table --- */
+  .table-wrap {
+    max-width: 960px;
+    margin: 0 auto 3rem;
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  th, td { padding: .9rem 1.2rem; text-align: center; }
+  th { background: rgba(0,0,0,.35); font-size: .85rem; text-transform: uppercase; letter-spacing: .5px; color: #aaa; }
+  td { border-bottom: 1px solid rgba(255,255,255,.04); }
+  tr:last-child td { border-bottom: none; }
+  .label-col { text-align: left; font-weight: 600; color: #ccc; width: 35%; }
+
+  /* --- Bar Chart --- */
+  .bar-chart { max-width: 960px; margin: 0 auto 3rem; }
+  .bar-group { margin-bottom: 1.4rem; }
+  .bar-label { font-size: .88rem; color: #aaa; margin-bottom: .4rem; }
+  .bars { display: flex; gap: .6rem; align-items: center; }
+  .bar-container { flex: 1; position: relative; height: 32px; background: rgba(255,255,255,.04); border-radius: 8px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 8px; transition: width .6s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: .6rem; font-size: .75rem; font-weight: 600; color: #fff; min-width: 48px; }
+  .bar.btc { background: linear-gradient(90deg, var(--btc-color), #ffb347); }
+  .bar.eth { background: linear-gradient(90deg, var(--eth-color), #8fa8d1); }
+
+  /* --- Donut / Pie Chart (CSS) --- */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+    max-width: 960px;
+    margin: 0 auto 3rem;
+  }
+  .chart-card {
+    background: var(--card-bg);
+    border-radius: 14px;
+    padding: 1.5rem;
+    text-align: center;
+  }
+  .chart-card h3 { margin-bottom: 1rem; color: var(--accent); font-size: 1rem; }
+
+  /* --- Timeline --- */
+  .timeline { max-width: 960px; margin: 0 auto 3rem; position: relative; padding-left: 2rem; }
+  .timeline::before { content:''; position:absolute; left:14px; top:0; bottom:0; width:3px; background:rgba(255,255,255,.1); border-radius:3px; }
+  .tl-item { position:relative; margin-bottom:1.6rem; padding-left:.8rem; }
+  .tl-item::before { content:''; position:absolute; left:-1.45rem; top:6px; width:12px; height:12px; border-radius:50%; background:var(--accent); }
+  .tl-year { font-weight:700; color:var(--accent); font-size:.95rem; }
+  .tl-desc { color:#aaa; font-size:.88rem; margin-top:.2rem; }
+
+  /* --- Footer --- */
+  footer { text-align:center; color:#666; font-size:.8rem; margin-top:3rem; }
+</style>
+</head>
+<body>
+
+<h1>Bitcoin vs Ethereum</h1>
+<p class="subtitle">Side-by-side comparison as of early 2026 · Data approximate &amp; illustrative</p>
+
+<!-- ===== HEADER CARDS ===== -->
+<div class="header-cards">
+  <div class="coin-card btc">
+    <div class="coin-icon">₿</div>
+    <h2>Bitcoin (BTC)</h2>
+    <div class="stat-row"><span class="stat-label">Type</span><span class="stat-value">Digital Gold / Store of Value</span></div>
+    <div class="stat-row"><span class="stat-label">Token Supply</span><span class="stat-value">Max 21,000,000</span></div>
+    <div class="stat-row"><span class="stat-label">Consensus</span><span class="stat-value">Proof-of-Work (PoW)</span></div>
+    <div class="stat-row"><span class="stat-label">Block Time</span><span class="stat-value">~10 minutes</span></div>
+    <div class="stat-row"><span class="stat-label">Scripting</span><span class="stat-value">Bitcoin Script (limited)</span></div>
+    <div class="stat-row"><span class="stat-label">2025 Price Range</span><span class="stat-value">$80,000 – $106,000</span></div>
+  </div>
+  <div class="coin-card eth">
+    <div class="coin-icon">⟠</div>
+    <h2>Ethereum (ETH)</h2>
+    <div class="stat-row"><span class="stat-label">Type</span><span class="stat-value">World Computer / Smart-Contract Platform</span></div>
+    <div class="stat-row"><span class="stat-label">Token Supply</span><span class="stat-value">Uncapped (deflationary via burns)</span></div>
+    <div class="stat-row"><span class="stat-label">Consensus</span><span class="stat-value">Proof-of-Stake (PoS) — The Merge, 2022</span></div>
+    <div class="stat-row"><span class="stat-label">Block Time</span><span class="stat-value">~12 seconds</span></div>
+    <div class="stat-row"><span class="stat-label">Scripting</span><span class="stat-value">EVM — Turing-complete smart contracts</span></div>
+    <div class="stat-row"><span class="stat-label">2025 Price Range</span><span class="stat-value">$3,600 – $4,100</span></div>
+  </div>
+</div>
+
+<!-- ===== COMPARISON TABLE ===== -->
+<h3 class="section-title">⚖️ Detailed Comparison Table</h3>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Feature</th><th style="color:var(--btc-color)">Bitcoin (BTC)</th><th style="color:var(--eth-color)">Ethereum (ETH)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="label-col">Primary Use Case</td><td>Digital store of value</td><td>Smart contracts &amp; dApps platform</td></tr>
+    <tr><td class="label-col">Consensus Mechanism</td><td>PoW (Proof-of-Work)</td><td>PoS (Proof-of-Stake) since 2022</td></tr>
+    <tr><td class="label-col">Total Supply</td><td>Capped at 21M</td><td>No hard cap; burns offset issuance</td></tr>
+    <tr><td class="label-col">Block Time</td><td>~10 min</td><td>~12 sec</td></tr>
+    <tr><td class="label-col">Transaction Speed (TPS)</td><td>~3-7 TPS</td><td>~15-30 TPS (L1), 10k+ with L2s</td></tr>
+    <tr><td class="label-col">Smart Contracts</td><td>No (limited scripting)</td><td>Full EVM support</td></tr>
+    <tr><td class="label-col">Energy Use</td><td>High (mining)</td><td>~99.95% less than PoW</td></tr>
+    <tr><td class="label-col">Governance</td><td>Decentralized, no formal governance</td><td>Core devs + EIP process + community</td></tr>
+    <tr><td class="label-col">Network Effects</td><td>Strongest brand recognition</td><td>Largest dApp / DeFi / NFT ecosystem</td></tr>
+    <tr><td class="label-col">Institutional Adoption</td><td>BTC ETFs approved (Jan 2024)</td><td>ETH ETFs approved (May 2024)</td></tr>
+    <tr><td class="label-col">Layer-2 Solutions</td><td>Lightning Network</td><td>Arbitrum, Optimism, Base, zkSync</td></tr>
+    <tr><td class="label-col">Halving Cycle</td><td>Every ~4 years (last: Apr 2024)</td><td>No halving; EIP-1559 burns supply</td></tr>
+    <tr><td class="label-col">Staking / Yield</td><td>N/A</td><td>~3-5% APY staking rewards</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ===== BAR CHARTS ===== -->
+<h3 class="section-title">📊 Key Metrics Comparison (Bar Chart)</h3>
+<div class="bar-chart" id="barChart"></div>
+
+<!-- ===== DONUT CHARTS ===== -->
+<h3 class="section-title">🥧 Market Share &amp; Ecosystem</h3>
+<div class="charts-grid">
+  <div class="chart-card">
+    <h3>Market Cap Share (Crypto)</h3>
+    <svg viewBox="0 0 200 200" width="200" height="200">
+      <!-- BTC ~55%, ETH ~16% -->
+      <circle cx="100" cy="100" r="80" fill="none" stroke="#f7931a" stroke-width="30" stroke-dasharray="251.3 251.3" transform="rotate(-90 100 100)"/>
+      <circle cx="100" cy="100" r="80" fill="none" stroke="#627fb5" stroke-width="30" stroke-dasharray="72.3 430.3" stroke-dashoffset="-251.3" transform="rotate(-90 100 100)"/>
+      <text x="100" y="95" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">~$1.6T</text>
+      <text x="100" y="112" text-anchor="middle" fill="#aaa" font-size="11">Total Crypto</text>
+    </svg>
+    <div style="margin-top:.8rem; font-size:.85rem;">
+      <span style="color:var(--btc-color)">● BTC ~55%</span>&nbsp;&nbsp;
+      <span style="color:var(--eth-color)">● ETH ~16%</span>&nbsp;&nbsp;
+      <span style="color:#aaa">Others ~29%</span>
+    </div>
+  </div>
+  <div class="chart-card">
+    <h3>DeFi TVL (Total Value Locked)</h3>
+    <svg viewBox="0 0 200 200" width="200" height="200">
+      <!-- ETH ~85% of DeFi -->
+      <circle cx="100" cy="100" r="80" fill="none" stroke="#627fb5" stroke-width="30" stroke-dasharray="427 125.6" transform="rotate(-90 100 100)"/>
+      <circle cx="100" cy="100" r="80" fill="none" stroke="#f7931a" stroke-width="30" stroke-dasharray="25.1 427" stroke-dashoffset="-427" transform="rotate(-90 100 100)"/>
+      <text x="100" y="95" text-anchor="middle" fill="#fff" font-size="18" font-weight="700">~$60B</text>
+      <text x="100" y="112" text-anchor="middle" fill="#aaa" font-size="11">DeFi TVL</text>
+    </svg>
+    <div style="margin-top:.8rem; font-size:.85rem;">
+      <span style="color:var(--eth-color)">● ETH ~85%</span>&nbsp;&nbsp;
+      <span style="color:var(--btc-color)">● BTC DeFi ~4%</span>&nbsp;&nbsp;
+      <span style="color:#aaa">Others ~11%</span>
+    </div>
+  </div>

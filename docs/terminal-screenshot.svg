@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 446" width="100%" height="100%">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="8" stdDeviation="24" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Window frame -->
+  <rect x="0" y="0" width="600" height="446" rx="12" fill="#12121a" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect x="1" y="1" width="598" height="37" rx="11" fill="#0d0d14"/>
+  <rect x="1" y="37" width="598" height="1" fill="#1a1a24"/>
+
+  <!-- Traffic lights -->
+  <circle cx="18" cy="19" r="5" fill="#ff5f57"/>
+  <circle cx="34" cy="19" r="5" fill="#ffbd2e"/>
+  <circle cx="50" cy="19" r="5" fill="#28c840"/>
+
+  <!-- Title -->
+  <text x="300" y="24" fill="#555" font-family="'JetBrains Mono', monospace" font-size="12" text-anchor="middle">open-agent — interactive</text>
+
+  <!-- Body background -->
+  <rect x="1" y="38" width="598" height="407" fill="#0a0a0f"/>
+  <text x="24" y="72" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">┌───────────────────────────────────────────────────────────────┐</text>
+  <text x="24" y="92" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">│                                                               │</text>
+  <text x="24" y="112" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">│   ░░▒▒▓▓  █▀█ █▀█ █▀▀ █▄ █    ▄▀█ █▀▀ █▀▀ █▄ █ ▀█▀   ▓▓▒▒░░  │</text>
+  <text x="24" y="132" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">│   ░░▒▒▓▓  █▄█ █▀▀ ██▄ █ ▀█    █▀█ █▄█ ██▄ █ ▀█  █    ▓▓▒▒░░  │</text>
+  <text x="24" y="152" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">│                                                               │</text>
+  <text x="24" y="172" fill="#a78bfa" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">│       local-first · privacy-first · intelligence-driven       │</text>
+  <text x="24" y="192" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">│                                                               │</text>
+  <text x="24" y="212" fill="#5dade2" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">└───────────────────────────────────────────────────────────────┘</text>
+  <text x="24" y="252" fill="#6b6b7b" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">  ╭─ Active Mission</text>
+  <text x="24" y="272" fill="#d4d4dc" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">  │ Refactor auth module: JWT → OAuth2, add MFA support</text>
+  <text x="24" y="292" fill="#6b6b7b" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">  ╰─────────────────────────────────────────────────</text>
+  <text x="24" y="312" fill="#6b6b7b" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve">  ── Step 1 ──</text>
+  <text x="24" y="332" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve"><tspan fill="#00d9ff">  ◆</tspan><tspan fill="#9a9aaa"> Reading projects/auth/auth.py ...</tspan></text>
+  <text x="24" y="352" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve"><tspan fill="#00d9ff">  ◆</tspan><tspan fill="#9a9aaa"> Reading projects/auth/models.py ...</tspan></text>
+  <text x="24" y="372" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve"><tspan fill="#4ade80">  ✓</tspan><tspan fill="#9a9aaa"> Codebase mapped (3 files, 284 lines)</tspan></text>
+  <text x="24" y="412" font-family="'JetBrains Mono', monospace" font-size="14" xml:space="preserve"><tspan fill="#4ade80">$</tspan><tspan fill="#d4d4dc"> refactor auth module --coding</tspan></text>
+  <rect x="287.5" y="399" width="7" height="16" fill="#4ade80">
+    <animate attributeName="opacity" values="0.9;0;0.9" dur="1s" repeatCount="indefinite"/>
+  </rect>
+</svg>

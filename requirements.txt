@@ -1,0 +1,5 @@
+httpx
+prompt_toolkit
+beautifulsoup4
+watchdog
+pygments

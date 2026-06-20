@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{
+      --bg:#0f0f13;--card:#1a1a24;--accent:#6c63ff;--text:#e0e0e8;
+      --muted:#88889a;--border:#2a2a3a;
+    }
+    body{
+      font-family:system-ui,-apple-system,sans-serif;
+      background:var(--bg);color:var(--text);min-height:100vh;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+    }
+    .container{max-width:960px;width:100%;padding:2rem}
+    h1{font-size:2.4rem;font-weight:700;margin-bottom:.5rem;letter-spacing:-.5px}
+    .subtitle{color:var(--muted);margin-bottom:2.5rem;font-size:1.05rem}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.25rem}
+    .card{
+      background:var(--card);border:1px solid var(--border);border-radius:14px;
+      padding:1.75rem 1.5rem;transition:transform .2s,border-color .2s;cursor:pointer;
+    }
+    .card:hover{transform:translateY(-4px);border-color:var(--accent)}
+    .card-icon{font-size:1.8rem;margin-bottom:.75rem}
+    .card h2{font-size:1.15rem;font-weight:600;margin-bottom:.35rem}
+    .card p{color:var(--muted);font-size:.92rem;line-height:1.5}
+    .progress-bar{height:6px;background:var(--border);border-radius:3px;margin-top:1rem;overflow:hidden}
+    .progress-fill{height:100%;border-radius:3px;background:var(--accent);width:0%;transition:width 1.5s ease}
+    .clock{text-align:center;margin-bottom:2rem;color:var(--muted);font-size:.95rem;letter-spacing:1px}
+    #time{color:var(--text);font-weight:600;font-size:1.3rem;display:block;margin-bottom:.25rem}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="clock">
+      <span id="time"></span>
+      <span id="date"></span>
+    </div>
+    <h1>Hello, World.</h1>
+    <p class="subtitle">A clean starting point — customize it to make it yours.</p>
+    <div class="grid">
+      <div class="card" onclick="this.style.borderColor='#6c63ff'">
+        <div class="card-icon">🚀</div>
+        <h2>Projects</h2>
+        <p>Track your active projects and milestones in one place.</p>
+        <div class="progress-bar"><div class="progress-fill" style="width:65%"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🎯</div>
+        <h2>Goals</h2>
+        <p>Set weekly targets and watch progress bars grow over time.</p>
+        <div class="progress-bar"><div class="progress-fill" style="width:40%"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-icon">📚</div>
+        <h2>Learning</h2>
+        <p>Log new skills, book notes, and concepts you want to revisit.</p>
+        <div class="progress-bar"><div class="progress-fill" style="width:80%"></div></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    function tick(){
+      const d=new Date();
+      document.getElementById('time').textContent=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      document.getElementById('date').textContent=d.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric',year:'numeric'});
+    }
+    tick();setInterval(tick,1000);
+
+    // Animate progress bars on load
+    document.querySelectorAll('.progress-fill').forEach(el=>{
+      const w=el.style.width;el.style.width='0';
+      setTimeout(()=>el.style.width=w,300);
+    });
+  </script>
+</body>
+</html>

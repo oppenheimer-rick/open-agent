@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Calculator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; background: #1a1a2e; font-family: 'Segoe UI', sans-serif;
+        }
+        .calculator {
+            width: 320px; background: #16213e; border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4); overflow: hidden;
+        }
+        .display {
+            padding: 30px 20px; text-align: right; background: #0f3460;
+        }
+        .display .expression { font-size: 16px; color: #888; min-height: 20px; }
+        .display .result { font-size: 48px; color: #e94560; margin-top: 8px; }
+        .buttons {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+            padding: 10px; background: #16213e;
+        }
+        button {
+            padding: 20px; font-size: 20px; border: none; border-radius: 8px;
+            cursor: pointer; transition: all 0.15s; font-weight: 500;
+        }
+        button:hover { transform: scale(1.05); }
+        button:active { transform: scale(0.95); opacity: 0.8; }
+        .btn-num { background: #1a1a2e; color: #fff; }
+        .btn-op { background: #e94560; color: #fff; }
+        .btn-clear { background: #533d7a; color: #fff; }
+        .btn-eq { background: #0f3460; color: #fff; grid-column: span 2; }
+    </style>
+</head>
+<body>
+    <div class="calculator">
+        <div class="display">
+            <div class="expression" id="expr"></div>
+            <div class="result" id="result">0</div>
+        </div>
+        <div class="buttons">
+            <button class="btn-clear" onclick="clearAll()">AC</button>
+            <button class="btn-op" onclick="addOp('÷')">÷</button>
+            <button class="btn-op" onclick="addOp('×')">×</button>
+            <button class="btn-op" onclick="backspace()">⌫</button>
+
+            <button class="btn-num" onclick="addNum('7')">7</button>
+            <button class="btn-num" onclick="addNum('8')">8</button>
+            <button class="btn-num" onclick="addNum('9')">9</button>
+            <button class="btn-op" onclick="addOp('-')">−</button>
+
+            <button class="btn-num" onclick="addNum('4')">4</button>
+            <button class="btn-num" onclick="addNum('5')">5</button>
+            <button class="btn-num" onclick="addNum('6')">6</button>
+            <button class="btn-op" onclick="addOp('+')">+</button>
+
+            <button class="btn-num" onclick="addNum('1')">1</button>
+            <button class="btn-num" onclick="addNum('2')">2</button>
+            <button class="btn-num" onclick="addNum('3')">3</button>
+            <button class="btn-num" onclick="addNum('.')">.</button>
+
+            <button class="btn-num" onclick="addNum('0')">0</button>
+            <button class="btn-eq" onclick="calculate()">=</button>
+        </div>
+    </div>
+
+    <script>
+        let current = '', expr = '';
+
+        function update() {
+            document.getElementById('expr').textContent = expr;
+            document.getElementById('result').textContent = current || '0';
+        }
+
+        function addNum(n) {
+            if (current === '0' && n !== '.') current = '';
+            current += n;
+            update();
+        }
+
+        function addOp(op) {
+            if (!current) return;
+            expr = current + ' ' + op + ' ';
+            current = '';
+            update();
+        }
+
+        function backspace() {
+            current = current.slice(0, -1);
+            update();
+        }
+
+        function clearAll() {
+            current = ''; expr = '';
+            update();
+        }
+
+        function calculate() {
+            if (!expr || !current) return;
+            let parts = (expr + current).split(' ');
+            let a = parseFloat(parts[0]), b = parseFloat(parts[2]), res;
+            switch(parts[1]) {
+                case '+': res = a + b; break;
+                case '-': res = a - b; break;
+                case '×': res = a * b; break;
+                case '÷': res = b !== 0 ? a / b : 'Error'; break;
+            }
+            expr = parts.join(' ') + ' =';
+            current = String(res);
+            update();
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key >= '0' && e.key <= '9') addNum(e.key);
+            else if (e.key === '.') addNum('.');
+            else if (e.key === '+') addOp('+');
+            else if (e.key === '-') addOp('-');
+            else if (e.key === '*') addOp('×');
+            else if (e.key === '/') addOp('÷');
+            else if (e.key === 'Enter') calculate();
+            else if (e.key === 'Escape') clearAll();
+            else if (e.key === 'Backspace') backspace();
+        });
+    </script>
+</body>
+</html>

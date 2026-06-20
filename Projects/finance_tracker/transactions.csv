@@ -1,0 +1,4 @@
+date,type,amount,category,description
+2026-06-12,income,5000.0,salary,Monthly salary
+2026-06-12,expense,1200.0,rent,Apartment rent
+2026-06-12,expense,50.0,food,Groceries

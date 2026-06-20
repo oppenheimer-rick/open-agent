@@ -1,0 +1,29 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8081:8080"
+    volumes:
+      - searxng-data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081
+    restart: unless-stopped
+
+  open-agent:
+    build: .
+    image: open-agent:latest
+    volumes:
+      - ./projects:/workspace
+    working_dir: /workspace
+    environment:
+      - LLM_BASE=http://host.docker.internal:8083/v1
+      - SEARXNG_URL=http://searxng:8080/search
+    depends_on:
+      - searxng
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stdin_open: true
+    tty: true
+
+volumes:
+  searxng-data:

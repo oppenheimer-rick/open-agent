@@ -1,0 +1,3 @@
+{"task_id": "BigCodeBench/0", "solution": "", "entry_point": "task_func", "libs": "['random', 'itertools']", "duration_s": 155.8, "solution_len": 0, "eval": {"passed": false, "num_tests": 0, "num_passed": 0, "errors": [], "output": ""}}
+{"task_id": "BigCodeBench/1", "solution": "", "entry_point": "task_func", "libs": "['collections', 'random', 'string']", "duration_s": 10.0, "solution_len": 0, "eval": {"passed": false, "num_tests": 0, "num_passed": 0, "errors": [], "output": ""}}
+{"task_id": "BigCodeBench/2", "solution": "", "entry_point": "task_func", "libs": "['statistics', 'random']", "duration_s": 1.2, "solution_len": 0, "eval": {"passed": false, "num_tests": 0, "num_passed": 0, "errors": [], "output": ""}}
