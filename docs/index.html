@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -33,13 +33,14 @@ html { scroll-behavior: smooth; }
 
 /* ── Custom Parallax & Artwork Layouts ── */
 .hero-content {
-  flex: 1.2;
-  text-align: left;
+  flex: 1;
+  text-align: center;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   min-width: 0;
   z-index: 2;
+  width: 100%;
 }
 .hero-artwork {
   flex: 0.8;
@@ -127,8 +128,8 @@ body::after {
 .hero {
   min-height: 90vh;
   display: flex;
-  flex-direction: row;
-  justify-content: space-between;
+  flex-direction: column;
+  justify-content: center;
   align-items: center;
   gap: 40px;
   padding: 80px 24px 60px;
@@ -483,29 +484,29 @@ footer .mono { font-family: var(--mono); }
       <span>Local First</span> • Privacy First • Intelligence Driven
     </div>
     
-    <h1 style="font-family: var(--title-font); font-weight: 300; line-height: 0.95; letter-spacing: -2px; margin-bottom: 20px; font-size: clamp(54px, 7vw, 92px);"><span class="accent">Open</span><br><span class="cyan">Agent</span></h1>
+    <h1 style="font-family: 'Syne', sans-serif; font-weight: 800; text-transform: uppercase; line-height: 0.85; letter-spacing: -4px; margin-bottom: 24px; font-size: clamp(72px, 11vw, 128px);"><span class="accent glow-accent">Open</span><br><span class="cyan glow-cyan">Agent</span></h1>
 
-    <p class="subtitle" style="text-align: left; margin-bottom: 32px; max-width: 540px; font-size: clamp(16px, 1.8vw, 18px); color: var(--text-dim); line-height: 1.6;">
+    <p class="subtitle" style="text-align: center; margin: 0 auto 32px; max-width: 540px; font-size: clamp(16px, 1.8vw, 18px); color: var(--text-dim); line-height: 1.6;">
       A terminal IDE agent that works with <span style="color:var(--accent); font-weight: 500;">any local LLM</span>.<br>
       Persistent memory · Mission tracking · Web search · Precision editing<span class="type-cursor"></span>
     </p>
 
-    <div class="stats-bar" style="justify-content: flex-start; margin-bottom: 36px; gap: 32px;">
-      <div class="stat-item" style="text-align: left;"><div class="stat-number glow-accent" style="font-size: 24px;">8</div><div class="stat-label">Core Modules</div></div>
-      <div class="stat-item" style="text-align: left;"><div class="stat-number glow-accent" style="font-size: 24px;">25+</div><div class="stat-label">Tools</div></div>
-      <div class="stat-item" style="text-align: left;"><div class="stat-number glow-accent" style="font-size: 24px;">3.6k</div><div class="stat-label">Lines of Python</div></div>
-      <div class="stat-item" style="text-align: left;"><div class="stat-number glow-accent" style="font-size: 24px;">MIT</div><div class="stat-label">License</div></div>
+    <div class="stats-bar" style="justify-content: center; margin-bottom: 36px; gap: 32px;">
+      <div class="stat-item" style="text-align: center;"><div class="stat-number glow-accent" style="font-size: 24px;">8</div><div class="stat-label">Core Modules</div></div>
+      <div class="stat-item" style="text-align: center;"><div class="stat-number glow-accent" style="font-size: 24px;">25+</div><div class="stat-label">Tools</div></div>
+      <div class="stat-item" style="text-align: center;"><div class="stat-number glow-accent" style="font-size: 24px;">3.6k</div><div class="stat-label">Lines of Python</div></div>
+      <div class="stat-item" style="text-align: center;"><div class="stat-number glow-accent" style="font-size: 24px;">MIT</div><div class="stat-label">License</div></div>
     </div>
 
-    <div class="hero-actions" style="justify-content: flex-start; margin-bottom: 32px; width: 100%;">
+    <div class="hero-actions" style="justify-content: center; margin-bottom: 32px; width: 100%;">
       <a href="#install" class="btn btn-primary">Get Started</a>
       <a href="#features" class="btn btn-secondary">Features</a>
       <a href="https://github.com/oppenheimer-rick/open-agent" class="btn btn-secondary">GitHub</a>
     </div>
 
     <!-- Curl Installer Widget -->
-    <div style="animation: fadeSlideUp 0.8s 0.35s ease both; z-index: 10; width: 100%;">
-      <div style="background: rgba(13, 13, 18, 0.75); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; font-family: var(--mono); font-size: 14px; color: var(--text-dim); display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); backdrop-filter: blur(12px); max-width: 580px; width: 100%;">
+    <div style="animation: fadeSlideUp 0.8s 0.35s ease both; z-index: 10; width: 100%; display: flex; justify-content: center;">
+      <div style="background: rgba(13, 13, 18, 0.75); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; font-family: var(--mono); font-size: 14px; color: var(--text-dim); display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); backdrop-filter: blur(12px); max-width: 580px; width: 100%; margin: 0 auto;">
         <span style="color: var(--accent); font-weight: bold; flex-shrink: 0;">$</span>
         <span id="install-cmd-text" style="color: var(--text); user-select: all; text-align: left; overflow-x: auto; white-space: nowrap; flex-grow: 1; scrollbar-width: none;">curl -fsSL https://raw.githubusercontent.com/oppenheimer-rick/open-agent/main/install.sh | bash</span>
         <button onclick="copyInstallCmd()" style="background: transparent; border: none; color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 4px; transition: all 150ms; flex-shrink: 0;" title="Copy to clipboard" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-dim)'">
@@ -513,10 +514,6 @@ footer .mono { font-family: var(--mono); }
         </button>
       </div>
     </div>
-  </div>
-
-  <div class="hero-artwork">
-    <img src="hero-art.png" alt="Open-Agent Cybernetic Art">
   </div>
 </section>
 
@@ -759,13 +756,13 @@ footer .mono { font-family: var(--mono); }
   const ctx = canvas.getContext('2d');
   let W, H;
   let particles = [];
-  const particleCount = 140; // Balanced count for dense, smooth flow without performance impact
+  const particleCount = 550; // Insanity level particle quantity
   const colors = [
-    'rgba(74, 222, 128, ',  // Green
-    'rgba(0, 217, 255, ',  // Cyan
-    'rgba(167, 139, 250, '  // Purple
+    'rgba(14, 14, 16, ', // Extremely dark gray, barely visible against #060608
+    'rgba(11, 11, 13, ', // Even closer to background
+    'rgba(18, 18, 22, '  // Very subtle obsidian dark
   ];
-  let mouse = { x: null, y: null, radius: 180 };
+  let mouse = { x: null, y: null, radius: 220 }; // Expanded interaction radius
 
   class Particle {
     constructor() {
@@ -777,58 +774,62 @@ footer .mono { font-family: var(--mono); }
     reset() {
       this.x = Math.random() * W;
       this.y = Math.random() * H;
-      this.vx = (Math.random() - 0.5) * 0.2;
-      this.vy = (Math.random() - 0.5) * 0.2;
-      this.life = Math.random() * 300 + 200; // longer life for smooth flow
+      this.vx = (Math.random() - 0.5) * 0.8; // High initial velocity range
+      this.vy = (Math.random() - 0.5) * 0.8;
+      this.life = Math.random() * 300 + 200; // Faster cycle rate
       this.alpha = 0;
-      this.targetAlpha = Math.random() * 0.45 + 0.15;
+      this.targetAlpha = Math.random() * 0.3 + 0.5; // Opacity 0.5 to 0.8 (Transparency 20% to 50%)
       this.size = Math.random() * 1.5 + 0.8;
       this.color = colors[Math.floor(Math.random() * colors.length)];
       this.history = [];
     }
 
     update(time) {
-      // Morphing flow angle based on position and time using multi-frequency waves
-      const angle = Math.sin(this.x * 0.002 + time * 0.04) * Math.cos(this.y * 0.002 - time * 0.03) * Math.PI * 2.5 +
-                    Math.sin((this.x + this.y) * 0.001 + time * 0.01) * Math.PI * 1.5;
+      // High-intensity flow field vector angle
+      const angle = Math.sin(this.x * 0.0035 + time * 0.08) * Math.cos(this.y * 0.0035 - time * 0.06) * Math.PI * 3.0 +
+                    Math.sin((this.x + this.y) * 0.0015 + time * 0.03) * Math.PI * 1.5;
 
-      // Acceleration from flow field
-      const ax = Math.cos(angle) * 0.08;
-      const ay = Math.sin(angle) * 0.08;
+      // Aggressive swim wiggle (faster frequency oscillation)
+      const swimWiggle = Math.sin(time * 12.0 + this.life * 0.22) * 0.38;
+      const finalAngle = angle + swimWiggle;
+
+      // High-intensity acceleration vectors
+      const ax = Math.cos(finalAngle) * 0.48;
+      const ay = Math.sin(finalAngle) * 0.48;
 
       this.vx += ax;
       this.vy += ay;
 
-      // Gentle random Brownian motion for organic feel
-      this.vx += (Math.random() - 0.5) * 0.03;
-      this.vy += (Math.random() - 0.5) * 0.03;
+      // Aggressive random drift vectors
+      this.vx += (Math.random() - 0.5) * 0.16;
+      this.vy += (Math.random() - 0.5) * 0.16;
 
-      // Interactive mouse gravity/repulsion and curl
+      // High-intensity cursor repulsion and rotational whirlpool physics
       if (mouse.x !== null && mouse.y !== null) {
         const dx = this.x - mouse.x;
         const dy = this.y - mouse.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         
         if (dist < mouse.radius) {
-          const force = (mouse.radius - dist) / mouse.radius; // 1 at center, 0 at boundary
+          const force = (mouse.radius - dist) / mouse.radius;
           
-          // Repel gently
-          this.vx += (dx / dist) * force * 0.25;
-          this.vy += (dy / dist) * force * 0.25;
+          // Powerful repulsion
+          this.vx += (dx / dist) * force * 0.75;
+          this.vy += (dy / dist) * force * 0.75;
 
-          // Curl / Whirlpool force (perpendicular vector)
-          this.vx += (-dy / dist) * force * 0.35;
-          this.vy += (dx / dist) * force * 0.35;
+          // Aggressive curl whirlpool turbulence
+          this.vx += (-dy / dist) * force * 0.85;
+          this.vy += (dx / dist) * force * 0.85;
         }
       }
 
-      // Drag/Friction to maintain controlled speeds
-      this.vx *= 0.97;
-      this.vy *= 0.97;
+      // Snappy friction drag to keep turns extremely sharp and dynamic
+      this.vx *= 0.94;
+      this.vy *= 0.94;
 
-      // Cap maximum velocity to keep motion soothing
+      // Aggressive max velocity limit
       const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-      const maxSpeed = 1.6;
+      const maxSpeed = 6.2;
       if (speed > maxSpeed) {
         this.vx = (this.vx / speed) * maxSpeed;
         this.vy = (this.vy / speed) * maxSpeed;
@@ -840,20 +841,20 @@ footer .mono { font-family: var(--mono); }
 
       // Track history coordinates for trailing effect
       this.history.push({ x: this.x, y: this.y });
-      if (this.history.length > 18) { // 18 segments for smooth thread trails
+      if (this.history.length > 20) {
         this.history.shift();
       }
 
-      // Manage lifecycle fading
+      // Snappy lifecycle fading transitions
       this.life--;
       if (this.life > 50) {
-        if (this.alpha < this.targetAlpha) this.alpha += 0.01;
+        if (this.alpha < this.targetAlpha) this.alpha += 0.04;
       } else {
-        this.alpha -= 0.015;
+        this.alpha -= 0.02;
       }
 
       // Reset when dead or way out of bounds
-      if (this.life <= 0 || this.x < -50 || this.x > W + 50 || this.y < -50 || this.y > H + 50) {
+      if (this.life <= 0 || this.x < -80 || this.x > W + 80 || this.y < -80 || this.y > H + 80) {
         this.reset();
       }
     }
@@ -861,28 +862,33 @@ footer .mono { font-family: var(--mono); }
     draw() {
       if (this.alpha <= 0 || this.history.length < 2) return;
 
-      // Draw the trailing path segment by segment to fade it out towards the tail (oldest points)
-      for (let i = 0; i < this.history.length - 1; i++) {
-        const p1 = this.history[i];
-        const p2 = this.history[i + 1];
-
-        // Ensure trail segments don't draw crazy jumps on reset
-        const segmentDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        if (segmentDist > 100) continue; 
-
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-
-        // Alpha fades to 0 at the tail
-        const ratio = i / (this.history.length - 1);
-        const segmentAlpha = this.alpha * ratio;
+      // Draw the entire trail in a single path stroke to eliminate performance overhead / browser lag
+      ctx.beginPath();
+      ctx.moveTo(this.history[0].x, this.history[0].y);
+      for (let i = 1; i < this.history.length; i++) {
+        const p1 = this.history[i - 1];
+        const p2 = this.history[i];
         
-        ctx.strokeStyle = this.color + segmentAlpha + ')';
-        ctx.lineWidth = this.size * (0.2 + 0.8 * ratio); // taper tail
-        ctx.lineCap = 'round';
-        ctx.stroke();
+        // Prevent drawing trail jump line segments on particle resets
+        if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 100) {
+          ctx.lineTo(p2.x, p2.y);
+        } else {
+          ctx.moveTo(p2.x, p2.y);
+        }
       }
+      
+      ctx.strokeStyle = this.color + (this.alpha * 0.4) + ')';
+      ctx.lineWidth = this.size;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      // Draw fish head
+      const head = this.history[this.history.length - 1];
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, this.size * 1.4, 0, Math.PI * 2);
+      ctx.fillStyle = this.color + this.alpha + ')';
+      ctx.fill();
     }
   }
 
@@ -926,9 +932,6 @@ footer .mono { font-family: var(--mono); }
   resize();
   draw();
 })();
-
-
-
 
 // ── Install Tabs ──
 document.querySelectorAll('.install-tab').forEach(tab => {
