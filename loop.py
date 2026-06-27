@@ -3802,25 +3802,40 @@ def update_openagent():
     if not (install_dir / ".git").exists():
         print(co(C.RED, "  Error: .git directory not found in ~/.openagent. Update requires git installation."))
         return
-        
+
     print(co(C.CYAN, "  Updating Open-Agent..."))
+
+    # Stash any local changes so git pull always succeeds cleanly
+    print(dim("  Stashing local changes (if any)..."))
+    stash_res = subprocess.run(["git", "stash"], cwd=str(install_dir), capture_output=True, text=True)
+    stashed = "No local changes" not in (stash_res.stdout or "")
+
     print(dim("  Running git pull..."))
-    res = subprocess.run(["git", "pull"], cwd=str(install_dir), capture_output=True, text=True)
-    print(res.stdout or res.stderr)
-    
+    res = subprocess.run(["git", "pull", "origin", "main"], cwd=str(install_dir), capture_output=True, text=True)
+    output = (res.stdout + res.stderr).strip()
+    if output:
+        print(dim(f"  {output}"))
+
     if res.returncode != 0:
+        if stashed:
+            subprocess.run(["git", "stash", "pop"], cwd=str(install_dir), capture_output=True, text=True)
         print(co(C.RED, "  Failed to run git pull."))
         return
-        
-    print(dim("  Installing/updating package and dependencies..."))
+
+    # Restore stashed changes on top of the freshly pulled code
+    if stashed:
+        pop_res = subprocess.run(["git", "stash", "pop"], cwd=str(install_dir), capture_output=True, text=True)
+        if pop_res.returncode != 0:
+            print(co(C.YELLOW, "  ⚠ Stash pop had conflicts — run 'git stash pop' manually in ~/.openagent"))
+
+    print(dim("  Installing/updating dependencies..."))
     pip_path = install_dir / "venv" / "bin" / "pip"
     if not pip_path.exists():
-        import sys
         pip_path = Path(sys.executable).parent / "pip"
-        
+
     res2 = subprocess.run([str(pip_path), "install", "-e", "."], cwd=str(install_dir), capture_output=True, text=True)
     if res2.returncode == 0:
-        print(co(C.GREEN, "  ✓ Open-Agent updated successfully! Please restart the REPL to apply changes."))
+        print(co(C.GREEN, "  ✓ Open-Agent updated successfully! Please restart to apply changes."))
     else:
         print(co(C.RED, "  Failed to run pip install."))
         print(res2.stderr)
