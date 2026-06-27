@@ -18,6 +18,9 @@ if not _IS_WINDOWS:
 # Cross-platform IPC socket path
 MPV_SOCK_PATH = str(Path(tempfile.gettempdir()) / "open_agent_mpv.sock")
 
+# Always store downloads in the openagent install dir, regardless of cwd
+DOWNLOADS_DIR = Path.home() / ".openagent" / "downloads"
+
 
 CURRENT_SONG = None  # Holds dict with 'title', 'filename', 'filepath', 'proc'
 
@@ -52,6 +55,65 @@ def find_media_player(prefer_no_video: bool = False):
             if resolved:
                 return player_name, str(resolved)
     return None, None
+
+def _tokenize(s: str) -> set:
+    """Lowercase word-set from a string, stripping punctuation for fuzzy matching."""
+    import re
+    return set(re.sub(r"[^\w\s]", "", s.lower()).split())
+
+
+def fuzzy_find_in_library(query: str, suffix: str) -> str | None:
+    """
+    Look through DOWNLOADS_DIR for an existing file whose name is a close
+    enough match to *query*.  Returns the file path string if found, else None.
+
+    Matching strategy (in order):
+      1. Exact stem match (case-insensitive).
+      2. Every word in the query appears in the filename.
+      3. >=60 % of query words appear in the filename.
+    """
+    if not DOWNLOADS_DIR.exists():
+        return None
+
+    candidates = list(DOWNLOADS_DIR.glob(f"*{suffix}"))
+    if not candidates:
+        return None
+
+    q_tokens = _tokenize(query)
+    if not q_tokens:
+        return None
+
+    # Strip common stop-words that clog matching
+    stop = {"a", "an", "the", "by", "of", "in", "to", "and", "play",
+            "me", "song", "music", "video", "watch", "please"}
+    q_tokens -= stop
+    if not q_tokens:
+        return None
+
+    best_file, best_score = None, 0.0
+    for f in candidates:
+        f_tokens = _tokenize(f.stem)
+        # Exact stem
+        if f.stem.lower() == query.lower():
+            return str(f)
+        # Overlap score
+        overlap = len(q_tokens & f_tokens)
+        score = overlap / len(q_tokens)
+        if score > best_score:
+            best_score, best_file = score, f
+
+    if best_score >= 0.6 and best_file:
+        return str(best_file)
+    return None
+
+
+def list_library() -> list[str]:
+    """Return sorted list of filenames in DOWNLOADS_DIR."""
+    if not DOWNLOADS_DIR.exists():
+        return []
+    files = sorted(DOWNLOADS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+    return [f.name for f in files if f.is_file()]
+
 
 def youtube_search(query: str, max_results: int = 5) -> list:
     """Search YouTube and return a list of video information dicts."""
@@ -93,70 +155,48 @@ def youtube_fetch_transcript(video_id: str) -> str:
         return f"Error: Could not fetch transcript for {video_id}: {e}"
 
 def download_media(query_or_url: str, video: bool = True) -> str | None:
-    """Download video or audio of a video/search query."""
-    download_dir = Path("downloads")
-    download_dir.mkdir(exist_ok=True)
-    
+    """Download video or audio of a video/search query to DOWNLOADS_DIR."""
+    DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    dl_str = str(DOWNLOADS_DIR)
+
     target = query_or_url
     if not target.startswith(("http://", "https://", "www.youtube.com")):
         target = f"ytsearch1:{query_or_url}"
-        
+
     suffix = ".mp4" if video else ".mp3"
     try:
-        # Get target filename first
+        # ── Ask yt-dlp what it would name the file (no download yet) ──────────
+        tmpl = f"{dl_str}/%(title)s.%(ext)s"
         if video:
-            cmd_filename = [
-                "yt-dlp",
-                "--print", "filename",
-                "-f", "best[ext=mp4]/best",
-                "-o", "downloads/%(title)s.%(ext)s",
-                "--no-playlist",
-                target
-            ]
+            cmd_filename = ["yt-dlp", "--print", "filename",
+                            "-f", "best[ext=mp4]/best",
+                            "-o", tmpl, "--no-playlist", target]
         else:
-            cmd_filename = [
-                "yt-dlp",
-                "--print", "filename",
-                "-x", "--audio-format", "mp3",
-                "-o", "downloads/%(title)s.%(ext)s",
-                "--no-playlist",
-                target
-            ]
-        res_file = subprocess.run(cmd_filename, capture_output=True, text=True, timeout=10.0)
+            cmd_filename = ["yt-dlp", "--print", "filename",
+                            "-x", "--audio-format", "mp3",
+                            "-o", tmpl, "--no-playlist", target]
+
+        res_file = subprocess.run(cmd_filename, capture_output=True, text=True, timeout=12.0)
         expected_filename = None
         if res_file.returncode == 0:
-            expected_filename = res_file.stdout.strip()
-            if expected_filename:
-                expected_filename = expected_filename.splitlines()[-1]
-                expected_path = Path(expected_filename)
-                if not video:
-                    expected_path = expected_path.with_suffix(".mp3")
-                expected_filename = str(expected_path)
-        
-        # ── Skip download if file already exists ────────────────────────────
+            raw = res_file.stdout.strip().splitlines()[-1].strip()
+            expected_path = Path(raw)
+            if not video:
+                expected_path = expected_path.with_suffix(".mp3")
+            expected_filename = str(expected_path)
+
+        # ── Skip download if exact file already exists ────────────────────────
         if expected_filename and Path(expected_filename).exists():
-            print(f"  [yt-dlp] Already downloaded: {Path(expected_filename).name}")
+            print(f"  ✓ Already in library: {Path(expected_filename).name}")
             return expected_filename
-        
-        # Run the actual download
+
+        # ── Download ──────────────────────────────────────────────────────────
         if video:
-            cmd_download = [
-                "yt-dlp",
-                "-f", "best[ext=mp4]/best",
-                "-o", "downloads/%(title)s.%(ext)s",
-                "--no-playlist",
-                "--no-warnings",
-                target
-            ]
+            cmd_download = ["yt-dlp", "-f", "best[ext=mp4]/best",
+                            "-o", tmpl, "--no-playlist", "--no-warnings", target]
         else:
-            cmd_download = [
-                "yt-dlp",
-                "-x", "--audio-format", "mp3",
-                "-o", "downloads/%(title)s.%(ext)s",
-                "--no-playlist",
-                "--no-warnings",
-                target
-            ]
+            cmd_download = ["yt-dlp", "-x", "--audio-format", "mp3",
+                            "-o", tmpl, "--no-playlist", "--no-warnings", target]
             
         proc = subprocess.Popen(
             cmd_download,
@@ -165,7 +205,7 @@ def download_media(query_or_url: str, video: bool = True) -> str | None:
             text=True,
             bufsize=1
         )
-        
+
         print("  [yt-dlp] Downloading...")
         for line in proc.stdout:
             line = line.strip()
@@ -173,17 +213,16 @@ def download_media(query_or_url: str, video: bool = True) -> str | None:
                 sys.stdout.write(f"\r  {line}")
                 sys.stdout.flush()
         proc.wait()
-        sys.stdout.write("\r  [yt-dlp] Download completed!                           \n")
+        sys.stdout.write("\r  [yt-dlp] Download complete!                           \n")
         sys.stdout.flush()
-        
+
         if expected_filename and Path(expected_filename).exists():
             return expected_filename
-            
-        # Fallback: check downloads folder
-        files = list(download_dir.glob(f"*{suffix}"))
+
+        # Fallback: newest matching file in DOWNLOADS_DIR
+        files = list(DOWNLOADS_DIR.glob(f"*{suffix}"))
         if files:
-            newest = max(files, key=lambda p: p.stat().st_mtime)
-            return str(newest)
+            return str(max(files, key=lambda p: p.stat().st_mtime))
     except Exception:
         pass
     return None
@@ -280,28 +319,54 @@ def stop_background_play() -> str:
 def play_song(query_or_url: str) -> str:
     """Download and play the media using mpv."""
     global CURRENT_SONG
-    
+
     # Terminate any existing player first
     stop_background_play()
-    
+
     # Determine if video/movie is requested
     q_lower = query_or_url.lower()
-    video_keywords = ["video", "watch", "movie", "film", "clip", "mv", "official video", "music video", "show", "trailer"]
+    video_keywords = ["video", "watch", "movie", "film", "clip", "mv",
+                      "official video", "music video", "show", "trailer"]
     is_video_request = any(kw in q_lower for kw in video_keywords)
-    
+    suffix = ".mp4" if is_video_request else ".mp3"
+
     print(f"\n🔍 Searching for: '{query_or_url}'")
-    if is_video_request:
-        print("📹 Video playback requested (GUI window will open).")
+
+    # ── Show library listing ──────────────────────────────────────────────────
+    library = list_library()
+    if library:
+        print(f"\n  📁 Library ({len(library)} file{'s' if len(library) != 1 else ''}):")
+        for name in library[:10]:
+            print(f"     • {name}")
+        if len(library) > 10:
+            print(f"     … and {len(library) - 10} more")
     else:
-        print("🎵 Audio playback requested (will play in background).")
-        
-    filepath = download_media(query_or_url, video=is_video_request)
-    if not filepath or not Path(filepath).exists():
-        # Fallback to opposite format if download failed
-        filepath = download_media(query_or_url, video=not is_video_request)
+        print("  📁 Library is empty.")
+
+    # ── Fuzzy check: already in library? ─────────────────────────────────────
+    fuzzy_hit = fuzzy_find_in_library(query_or_url, suffix)
+    if not fuzzy_hit and not is_video_request:
+        # Also check .mp4 for cross-format matches
+        fuzzy_hit = fuzzy_find_in_library(query_or_url, ".mp4")
+
+    filepath = None
+    if fuzzy_hit:
+        print(f"\n  ✓ Found in library: {Path(fuzzy_hit).name}")
+        filepath = fuzzy_hit
+    else:
+        if is_video_request:
+            print("  📹 Video playback requested (GUI window will open).")
+        else:
+            print("  🎵 Not in library — downloading...")
+
+        filepath = download_media(query_or_url, video=is_video_request)
         if not filepath or not Path(filepath).exists():
-            return f"ERROR: Failed to download media for query: '{query_or_url}'"
-        is_video_request = Path(filepath).suffix == ".mp4"
+            # Fallback to opposite format if download failed
+            filepath = download_media(query_or_url, video=not is_video_request)
+            if not filepath or not Path(filepath).exists():
+                return f"ERROR: Failed to download media for query: '{query_or_url}'"
+            is_video_request = Path(filepath).suffix == ".mp4"
+
         
     filename = Path(filepath).name
     title = Path(filepath).stem
