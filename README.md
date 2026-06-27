@@ -68,20 +68,35 @@ openagent
 
 Autonomous agent behavior demands a model capable of sustained reasoning and precise tool orchestration. Below is the recommended configuration.
 
-### ✦ Recommended: Qwen 2.5 Coding/Reasoning models (e.g. Qwen 2.5 7B/14B/32B/72B)
+### ✦ Recommended: Qwen 3.6 35B Coding/Reasoning models (e.g. Use MOE offloading if you have less VRAM)
 
 *Current gold standard for local reasoning and tool use.*
 
 Start your local backend (llama.cpp server example):
 ```bash
-./build/bin/llama-server \
--m /path/to/qwen-2.5-coder.gguf \
---host 0.0.0.0 \
---port 8083 \
--c 16384 \
---flash-attn on \
---cont-batching \
---temp 0.7
+llama-server  
+--host 127.0.0.1   
+--port 8083   
+--override-tensor 'blk\.(2[0-9]|3[0-9]|4[0-6])\.ffn_(gate_up|down)_exps\.weight=CPU'   
+-b 1024   
+-ub 256   
+--cache-type-k q4_0   
+--cache-type-v q4_0   
+--flash-attn on   
+--jinja   
+--top-k 20   
+--top-p 0.95   
+--temp 1.0   
+--repeat-penalty 1.0   
+--presence-penalty 1.5   
+--cache-prompt   
+--reasoning auto  
+--no-warmup 
+--n-cpu-moe 19  
+-m /path/to/models/Qwen3.6-35B-A3B-UD-IQ2_XXS.gguf  
+--no-mmap  
+-c 28000  
+--n-gpu-layers auto
 ```
 
 ## ◈ Core Capabilities
