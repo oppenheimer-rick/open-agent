@@ -116,6 +116,7 @@ llama-server
 | `⬡ run_bash` | Execute local terminal commands |
 | `⬡ run_python` | Run code snippets for validation |
 | `⬡ search_web` | Real-time multi-query web search |
+| `⬡ browse_web` | Headless browser automation (scrape, click, fill) using Playwright |
 
 </div>
 
@@ -136,11 +137,15 @@ llama-server
 | `/mission [init\|focus\|add\|status\|clear]` | Manage mission objectives |
 | `/search <query>` | Single-shot web search |
 | `/search-sessions <query>` | Full-text search across all saved sessions |
+| `/play <query>` | Play and stream YouTube music offline in a docked GUI window |
+| `/job-search <resume>` | Analyze resume, scrape vacancies, and match jobs autonomously |
+| `/update` | Automatically update open-agent source code and dependencies |
 
 | Key | Action |
 |---|---|
 | `Ctrl+O` | Show tool execution history |
 | `Ctrl+N` | New conversation |
+| `Ctrl+B` | Trigger the background media playback controller menu |
 | `Ctrl+/` | Show shortcuts help |
 | `Escape` | Close modal |
 | `Enter` | Send message |

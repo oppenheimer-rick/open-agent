@@ -11,6 +11,8 @@ Usage:
 
 # ── Imports ────────────────────────────────────────────────────────────────────
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.resolve()))
 import os
 import json
 import time
@@ -31,6 +33,9 @@ from watchdog.events import FileSystemEventHandler
 import memory
 import mission
 import out_of_the_box as ootb
+import job_search
+import providers
+import youtube_utils
 
 # ── File Watcher (Bidirectional TUI Sync) ──
 import queue
@@ -81,7 +86,6 @@ class FileChangeHandler(FileSystemEventHandler):
 
 # ── Prompt Toolkit ──
 from prompt_toolkit import PromptSession, HTML
-from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML as FormattedHTML
 from prompt_toolkit.completion import WordCompleter
@@ -94,11 +98,11 @@ except ImportError:
     MarkdownLexer = None
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-LLM_BASE = os.environ.get("LLM_BASE", "http://localhost:8083/v1")
+LLM_BASE = providers.BASE_URL
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "http://localhost:8081/search")
-MODEL = os.environ.get("MODEL", "local")  # llama.cpp ignores this field but requires it
-MAX_TOKENS = 4096
-TEMPERATURE = 0.6
+MODEL = providers.get_model()
+MAX_TOKENS = providers.get_max_tokens()
+TEMPERATURE = providers.get_temperature()
 MAX_STEPS = 500  # hard cap on agentic loop iterations
 MAX_RETRIES = 3  # retries per TODO item in coding mode
 PYTHON_TIMEOUT = 30  # seconds for sandboxed python
@@ -117,10 +121,10 @@ LOGO_WIDE = r"""
 """
 
 LOGO_NARROW = r"""
-┌─────────────────────────────────────────────────────┐
-│  ░▒▓ █▀█ █▀█ █▀▀ █▄ █ ▄▄ ▄▀█ █▀▀ █▀▀ █▄ █ ▀█▀ ▓▒░   │
-│  ░▒▓ █▄█ █▀▀ ██▄ █ ▀█    █▀█ █▄█ ██▄ █ ▀█  █  ▓▒░   │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│  ░▒▓ █▀█ █▀█ █▀▀ █▄ █ ▄▄ ▄▀█ █▀▀ █▀▀ █▄ █ ▀█▀ ▓▒░  │
+│  ░▒▓ █▄█ █▀▀ ██▄ █ ▀█    █▀█ █▄█ ██▄ █ ▀█  █  ▓▒░  │
+└────────────────────────────────────────────────────┘
 """
 
 
@@ -265,6 +269,18 @@ def ui_tool_call(name, args: dict, result=None, error=False):
                 m = re.search(r"\((.+)\)", str(result))
                 if m:
                     summary += f" ({m.group(1)})"
+            print(
+                f"  {check}  {co(C.BOLD + base_color, label.ljust(9))} {co(C.WHITE, summary)}"
+            )
+            # Show red/green diff lines
+            result_str = str(result)
+            if "\n" in result_str:
+                diff_part = result_str.split("\n", 1)[1]
+                for line in diff_part.splitlines()[:6]:
+                    print(f"  {line}")
+                if len(diff_part.splitlines()) > 6:
+                    print(dim("  ... more lines"))
+            return
         elif name == "outline_file":
             summary = f"{args.get('path')} → Structural map generated"
         elif name == "write_file":
@@ -345,6 +361,7 @@ def ui_banner():
     # Centered Logo
     for line in logo.strip("\n").splitlines():
         print(line.center(width))
+    print()
 
 
 # ── Session History ────────────────────────────────────────────────────────────
@@ -384,6 +401,272 @@ def session_save(messages: list, mode: str, task: str, session_id: str = None) -
     path.write_text(json.dumps(session, indent=2, default=str))
     _cleanup_old_sessions()
     return session_id
+
+
+CONFIG_FILE = Path.home() / ".agentic-loop" / "config.json"
+
+
+def config_load() -> dict:
+    """Load config from ~/.agentic-loop/config.json."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def config_save(config: dict):
+    """Save config to ~/.agentic-loop/config.json."""
+    try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(json.dumps(config, indent=2))
+    except Exception:
+        pass
+
+
+def llm_generate(system_prompt: str, user_prompt: str, max_tokens: int = 512) -> str:
+    """Direct, synchronous call to the LLM backend via provider abstraction."""
+    return providers.generate(system_prompt, user_prompt, max_tokens)
+
+
+OBSIDIAN_INSIGHTS = ""
+
+
+def fetch_hn_top_stories() -> list:
+    """Fetch the top 3 newest stories from Hacker News."""
+    stories = []
+    try:
+        with httpx.Client(timeout=0.6) as client:
+            resp = client.get("https://hacker-news.firebaseio.com/v0/newstories.json")
+            if resp.status_code == 200:
+                new_ids = resp.json()[:3]
+                for item_id in new_ids:
+                    try:
+                        item_resp = client.get(f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json")
+                        if item_resp.status_code == 200:
+                            data = item_resp.json()
+                            stories.append({
+                                "title": data.get("title", "No Title"),
+                                "url": data.get("url", f"https://news.ycombinator.com/item?id={item_id}")
+                            })
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return stories
+
+
+def fetch_random_wikipedia_article() -> dict | None:
+    """Fetch an interesting Wikipedia article from the curated "Unusual Articles" page."""
+    try:
+        import random
+        from bs4 import BeautifulSoup
+        
+        headers = {"User-Agent": "open-agent/1.0 (contact: github.com/oppenheimer-rick/open-agent)"}
+        with httpx.Client(timeout=1.5, headers=headers) as client:
+            r = client.get("https://en.wikipedia.org/wiki/Wikipedia:Unusual_articles")
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "html.parser")
+                content = soup.find(id="mw-content-text")
+                links = []
+                if content:
+                    for a in content.find_all("a", href=True):
+                        href = a["href"]
+                        if href.startswith("/wiki/") and not any(ns in href for ns in [":", "Main_Page", "Unusual_articles"]):
+                            title = href.split("/wiki/")[1]
+                            links.append(title)
+                
+                if links:
+                    chosen_title = random.choice(links)
+                    summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{chosen_title}"
+                    r_sum = client.get(summary_url)
+                    if r_sum.status_code == 200:
+                        data = r_sum.json()
+                        title = data.get("title", chosen_title.replace("_", " "))
+                        url = data.get("content_urls", {}).get("desktop", {}).get("page", "")
+                        extract = data.get("extract", "")
+                        
+                        if extract:
+                            wrapped_lines = []
+                            words = extract.split()
+                            curr_line = ""
+                            for w in words:
+                                if len(curr_line) + len(w) + 1 > 70:
+                                    wrapped_lines.append(curr_line)
+                                    curr_line = w
+                                else:
+                                    curr_line += (" " if curr_line else "") + w
+                            if curr_line:
+                                wrapped_lines.append(curr_line)
+                            
+                            return {
+                                "title": title,
+                                "extract_lines": wrapped_lines[:8],
+                                "url": url
+                            }
+    except Exception:
+        pass
+    return None
+
+
+def jarvis_system_check() -> str:
+    import platform
+    import getpass
+    from datetime import datetime
+    
+    # 1. Greetings
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        greeting = "Good morning, Sir. Diagnostics are green."
+    elif 12 <= hour < 17:
+        greeting = "Good afternoon, Sir. Core temperature is nominal."
+    elif 17 <= hour < 22:
+        greeting = "Good evening, Sir. All systems operating within standard parameters."
+    else:
+        greeting = "Working late, Sir? The Mark XLIII armor is on standby."
+
+    # 2. Battery / Arc Reactor Status
+    battery_status = "Arc Reactor Core: 100% (Stable)"
+    try:
+        bat_dir = Path("/sys/class/power_supply")
+        if bat_dir.exists():
+            for b in bat_dir.glob("BAT*"):
+                cap_file = b / "capacity"
+                status_file = b / "status"
+                if cap_file.exists():
+                    cap = cap_file.read_text().strip()
+                    status = status_file.read_text().strip() if status_file.exists() else "Discharging"
+                    battery_status = f"Arc Reactor Core: {cap}% ({status})"
+                    break
+    except Exception:
+        pass
+
+    # 3. Workspace Integrity Check (Git Status)
+    git_status = "Clean (nominal)"
+    try:
+        res = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, timeout=0.5)
+        if res.returncode == 0:
+            modified = [line for line in res.stdout.splitlines() if line.strip()]
+            if modified:
+                git_status = f"{len(modified)} files modified (uncommitted)"
+    except Exception:
+        pass
+
+    # 4. System Load average (Linux only)
+    load_str = "N/A"
+    if hasattr(os, "getloadavg"):
+        try:
+            load = os.getloadavg()
+            load_str = f"{load[0]:.2f}, {load[1]:.2f}, {load[2]:.2f}"
+        except Exception:
+            pass
+            
+    # 5. Memory Usage (from /proc/meminfo if on Linux)
+    mem_str = "N/A"
+    try:
+        if Path("/proc/meminfo").exists():
+            meminfo = Path("/proc/meminfo").read_text()
+            total_match = re.search(r"MemTotal:\s+(\d+)\s+kB", meminfo)
+            avail_match = re.search(r"MemAvailable:\s+(\d+)\s+kB", meminfo)
+            if total_match and avail_match:
+                total_gb = int(total_match.group(1)) / 1024 / 1024
+                avail_gb = int(avail_match.group(1)) / 1024 / 1024
+                used_gb = total_gb - avail_gb
+                mem_str = f"{used_gb:.1f}GB / {total_gb:.1f}GB used"
+    except Exception:
+        pass
+
+    # 6. Check local LLM status
+    llm_status = "OFFLINE"
+    try:
+        with httpx.Client(timeout=1.0) as client:
+            resp = client.get(f"{LLM_BASE}/models" if "llama" in LLM_BASE or "localhost" in LLM_BASE else f"{LLM_BASE}")
+            if resp.status_code in (200, 401, 404):
+                llm_status = "ONLINE"
+    except Exception:
+        pass
+        
+    hn_stories = fetch_hn_top_stories()
+    wiki_article = fetch_random_wikipedia_article()
+    
+    # Format JARVIS boot screen
+    lines = []
+    lines.append(co(C.BOLD + C.CYAN, "  🤖 J.A.R.V.I.S. Diagnostics Protocol"))
+    lines.append(dim("  " + "─" * 74))
+    lines.append(f"  {greeting}")
+    lines.append(f"  • {co(C.BOLD, 'Power Source:')}     {battery_status}")
+    lines.append(f"  • {co(C.BOLD, 'Load & Memory:')}    {load_str}  ·  {mem_str}")
+    lines.append(f"  • {co(C.BOLD, 'Workspace:')}        {git_status}")
+    lines.append(f"  • {co(C.BOLD, 'Neural Link:')}      Local LLM Backend: {co(C.GREEN if llm_status == 'ONLINE' else C.RED, llm_status)}")
+    lines.append(f"  • {co(C.BOLD, 'Security Grid:')}    Nominal. Encryption active.")
+    
+    if hn_stories:
+        lines.append("")
+        lines.append(co(C.BOLD + C.PURPLE, "  📰 Hacker News Intelligence Report:"))
+        for idx, story in enumerate(hn_stories):
+            lines.append(f"    {idx+1}. {co(C.BOLD, story['title'])}")
+            lines.append(dim(f"       {story['url']}"))
+            
+    if wiki_article:
+        lines.append("")
+        lines.append(co(C.BOLD + C.PURPLE, f"  📚 Random Wikipedia Article: {wiki_article['title']}"))
+        lines.append(dim(f"     {wiki_article['url']}"))
+        for w_line in wiki_article["extract_lines"]:
+            lines.append(f"     {w_line}")
+
+    lines.append(dim("  " + "─" * 74))
+    return "\n".join(lines)
+
+
+def check_and_summarize_obsidian_vault(force_scan=False) -> str:
+    """
+    Scans the Obsidian Vault for the 3 most recently modified notes,
+    and returns a formatted string of their filenames without reading their content.
+    """
+    config = config_load()
+    vault_path_str = os.environ.get("OBSIDIAN_VAULT") or config.get("obsidian_vault_path")
+    if not vault_path_str:
+        return ""
+
+    vault_path = Path(vault_path_str).expanduser().resolve()
+    if not vault_path.exists():
+        return f"Obsidian Vault path does not exist: {vault_path_str}"
+    if not vault_path.is_dir():
+        return f"Obsidian Vault path is not a directory: {vault_path_str}"
+
+    print(f"\n{co(C.CYAN, '  🔎 Scanning Obsidian Vault:')} {vault_path}")
+    
+    # Walk and find .md files
+    md_files = []
+    for root, dirs, files in os.walk(vault_path):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for f in files:
+            if f.endswith('.md') and not f.startswith('.'):
+                md_files.append(Path(root) / f)
+
+    if not md_files:
+        return "No markdown notes found in the Obsidian Vault."
+
+    # Sort by mtime descending
+    md_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    latest_files = md_files[:3]
+
+    # Format the insights beautifully listing files only
+    lines = []
+    lines.append("╭──────────────────────────────────────────────────────────────────────────╮")
+    lines.append(f"│  {co(C.BOLD + C.PURPLE, 'OBSIDIAN VAULT INSIGHTS (Latest Modified Notes)')}                     │")
+    lines.append("├──────────────────────────────────────────────────────────────────────────┤")
+    for idx, fp in enumerate(latest_files):
+        rel_path = fp.relative_to(vault_path)
+        path_line = f"  • {rel_path}"
+        lines.append(f"│ {co(C.BOLD + C.CYAN, path_line.ljust(72))} │")
+        if idx < len(latest_files) - 1:
+            lines.append("│                                                                          │")
+    lines.append("╰──────────────────────────────────────────────────────────────────────────╯")
+
+    insight_str = "\n".join(lines)
+    return insight_str
 
 
 def session_load(session_id: str) -> dict | None:
@@ -943,160 +1226,22 @@ class ConsoleRenderer:
 # ── LLM Streaming Client ───────────────────────────────────────────────────────
 def iter_chat_events(messages: list, tools: list = None):
     """
-    Stream from llama.cpp /v1/chat/completions.
+    Stream chat completions from the configured provider.
     Yields structured events; rendering happens outside this parser.
+    Delegates to providers.iter_chat_events for the actual streaming.
     """
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "temperature": TEMPERATURE,
-        "max_tokens": MAX_TOKENS,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-    if tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
-
-    yield {"type": "llm_start", "label": "Thinking…"}
-    first_token = True
-
-    full_content = ""
-    tool_calls_acc = {}  # index → {id, name, arguments}
-    finish_reason = "stop"
-    usage = {}
-
     try:
-        with httpx.Client(timeout=180) as client:
-            with client.stream(
-                "POST", f"{LLM_BASE}/chat/completions", json=payload
-            ) as resp:
-                resp.raise_for_status()
-                for raw_line in resp.iter_lines():
-                    if not raw_line.startswith("data: "):
-                        continue
-                    data = raw_line[6:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-
-                    choices = chunk.get("choices", [])
-                    choice = choices[0] if choices else {}
-                    delta = choice.get("delta", {})
-                    fr = choice.get("finish_reason")
-                    if fr:
-                        finish_reason = fr
-
-                    # Reasoning/thinking token. Different local servers expose
-                    # this under different OpenAI-compatible delta fields.
-                    reasoning = (
-                        delta.get("reasoning_content")
-                        or delta.get("reasoning")
-                        or delta.get("thinking")
-                    )
-
-                    # Stop spinner on first output
-                    if first_token and (
-                        delta.get("content") or reasoning or delta.get("tool_calls")
-                    ):
-                        yield {"type": "llm_first_output"}
-                        first_token = False
-
-                    if reasoning:
-                        yield {"type": "reasoning_delta", "text": reasoning}
-
-                    # Text token
-                    token = delta.get("content") or ""
-                    if token:
-                        full_content += token
-                        yield {"type": "assistant_delta", "text": token}
-
-                    # Tool call delta accumulation
-                    for tc_delta in delta.get("tool_calls", []):
-                        idx = tc_delta.get("index", 0)
-                        if idx not in tool_calls_acc:
-                            tool_calls_acc[idx] = {
-                                "id": "",
-                                "name": "",
-                                "arguments": "",
-                            }
-                        entry = tool_calls_acc[idx]
-
-                        delta_name = ""
-                        delta_args = ""
-
-                        if tc_delta.get("id"):
-                            entry["id"] = tc_delta["id"]
-                        fn = tc_delta.get("function", {})
-                        if fn.get("name"):
-                            delta_name = fn["name"]
-                            entry["name"] += delta_name
-                        if fn.get("arguments"):
-                            delta_args = fn["arguments"]
-                            entry["arguments"] += delta_args
-
-                        yield {
-                            "type": "tool_call_delta",
-                            "index": idx,
-                            "name": delta_name,
-                            "arguments": delta_args,
-                        }
-
-                    if "usage" in chunk:
-                        usage = chunk["usage"]
-
-    except httpx.HTTPStatusError as e:
-        yield {
-            "type": "error",
-            "message": f"HTTP {e.response.status_code}: {e.response.text[:200]}",
-        }
-        raise
-    except httpx.ConnectError:
-        yield {
-            "type": "error",
-            "message": "Cannot connect to llama.cpp — is it running on port 8083?",
-        }
-        raise
+        yield from providers.iter_chat_events(messages, tools)
     except KeyboardInterrupt:
         yield {"type": "error", "message": "Interrupted by user."}
         raise AgentInterrupted()
-
-    # Assemble tool_calls list
-    tool_calls_list = []
-    for idx in sorted(tool_calls_acc):
-        tc = tool_calls_acc[idx]
-        if tc["name"]:  # only include valid tool calls
-            tool_calls_list.append(
-                {
-                    "id": tc["id"] or f"call_{idx}_{int(time.time())}",
-                    "type": "function",
-                    "function": {
-                        "name": tc["name"],
-                        "arguments": tc["arguments"] or "{}",
-                    },
-                }
-            )
-
-    msg = {"role": "assistant", "content": full_content or None}
-    if tool_calls_list:
-        msg["tool_calls"] = tool_calls_list
-
-    yield {
-        "type": "assistant_done",
-        "message": msg,
-        "finish_reason": finish_reason,
-        "usage": usage,
-    }
 
 
 def stream_chat(
     messages: list, tools: list = None, renderer: ConsoleRenderer = None
 ) -> tuple:
     """
-    Stream from llama.cpp /v1/chat/completions.
+    Stream from the configured provider.
     Returns (message_dict, finish_reason, usage). Rendering is event-driven.
     """
     renderer = renderer or ConsoleRenderer()
@@ -1118,8 +1263,11 @@ def stream_chat(
 
 def debug_stream(user_message: str):
     """Print raw stream timing so UI delays can be separated from server delays."""
+    url = providers.get_chat_url()
+    print(dim(f"POST {url}  [{providers.status_line()}]"))
+    started = last = time.monotonic()
     payload = {
-        "model": MODEL,
+        "model": providers.get_model(),
         "messages": [
             {"role": "system", "content": "Reply directly and briefly."},
             {"role": "user", "content": user_message},
@@ -1128,7 +1276,6 @@ def debug_stream(user_message: str):
         "max_tokens": 512,
         "stream": True,
     }
-    print(dim(f"POST {LLM_BASE}/chat/completions"))
     started = last = time.monotonic()
     with httpx.Client(timeout=180) as client:
         with client.stream(
@@ -1300,7 +1447,26 @@ def patch_file(path: str, search: str, replace: str) -> str:
     old_n = original.count("\n") + 1
     new_n = updated.count("\n") + 1
     delta = f"+{new_n - old_n}" if new_n >= old_n else str(new_n - old_n)
-    return f"Patched: {path}  ({old_n} → {new_n} lines, {delta})"
+
+    # Build a red/green diff summary of the changed region
+    old_lines = original.splitlines()
+    new_lines = updated.splitlines()
+    search_lines = search.strip().splitlines() if search.strip() else []
+    replace_lines = replace.strip().splitlines() if replace.strip() else []
+    diff_lines = []
+
+    # Show old lines (removed) in red, new lines (added) in green
+    # Use the search temAM as the "old" block to highlight
+    for ln in search_lines:
+        diff_lines.append(f"{co(C.RED, '  -' + ln)}")
+    for ln in replace_lines:
+        diff_lines.append(f"{co(C.GREEN, '  +' + ln)}")
+
+    diff_output = "\n".join(diff_lines[:30])
+    if len(diff_lines) > 30:
+        diff_output += f"\n{co(C.GRAY, '  ... ' + str(len(diff_lines) - 30) + ' more lines')}"
+
+    return f"Patched: {path}  ({old_n} → {new_n} lines, {delta})\n{diff_output}"
 
 
 def grep_codebase(pattern: str, path: str = ".", file_ext: str = ".py") -> str:
@@ -1388,10 +1554,12 @@ def sentinel_map_codebase() -> str:
     """
     Architect-Sentinel: Automated codebase mapping.
     Scans the project to build a structural 'Global Blueprint'.
-    Now includes personal context and dynamic skill suggestions.
+    Includes personal context and dynamic skill suggestions.
     """
     cwd = Path.cwd()
     python_files = list(cwd.glob("**/*.py"))
+    js_files = list(cwd.glob("**/*.{js,ts,jsx,tsx}"))
+    html_files = list(cwd.glob("**/*.html"))
 
     parts = ["--- ARCHITECT-SENTINEL GLOBAL BLUEPRINT ---"]
 
@@ -1401,20 +1569,73 @@ def sentinel_map_codebase() -> str:
         bio_content = bio_path.read_text().strip()
         if bio_content:
             parts.append("\n👤 USER CONTEXT (BIOGRAPHY):")
-            parts.append(trunc(bio_content, 1000))  # Keep it minimal
+            parts.append(trunc(bio_content, 1000))
             parts.append("----------------------------\n")
 
     parts.append(f"Project Root: {cwd}")
-    parts.append(f"Composition: {len(python_files)} Python files.")
+
+    # Detect project type
+    project_type = "Unknown"
+    if (cwd / "setup.py").exists() or (cwd / "pyproject.toml").exists():
+        project_type = "Python Package"
+    elif (cwd / "package.json").exists():
+        project_type = "Node.js"
+    elif (cwd / "Cargo.toml").exists():
+        project_type = "Rust"
+    elif (cwd / "go.mod").exists():
+        project_type = "Go"
+    elif (cwd / "Makefile").exists() and (cwd / "Dockerfile").exists():
+        project_type = "DevOps/Infra"
+    parts.append(f"Project Type: {project_type}")
+    parts.append(f"Composition: {len(python_files)} Python, {len(js_files)} JS/TS, {len(html_files)} HTML files.")
+
+    # Detect frameworks/libs from imports
+    all_py_text = ""
+    for f in python_files[:20]:
+        try:
+            all_py_text += f.read_text(errors="ignore").lower() + "\n"
+        except Exception:
+            pass
+
+    frameworks = []
+    if "flask" in all_py_text:
+        frameworks.append("Flask")
+    if "fastapi" in all_py_text:
+        frameworks.append("FastAPI")
+    if "django" in all_py_text:
+        frameworks.append("Django")
+    if "pytest" in all_py_text:
+        frameworks.append("pytest")
+    if "tensorflow" in all_py_text or "keras" in all_py_text:
+        frameworks.append("TensorFlow/Keras")
+    if "torch" in all_py_text:
+        frameworks.append("PyTorch")
+    if "transformers" in all_py_text:
+        frameworks.append("HuggingFace Transformers")
+    if "playwright" in all_py_text or "selenium" in all_py_text:
+        frameworks.append("Browser Automation")
+    if "httpx" in all_py_text or "requests" in all_py_text:
+        frameworks.append("HTTP Client (httpx/requests)")
+
+    if frameworks:
+        parts.append(f"Detected Frameworks: {', '.join(frameworks)}")
 
     # Dynamic Skill Suggestions
     skills = []
-    if any(cwd.glob("**/three.js")) or any(cwd.glob("**/*.html")):
-        skills.append("ThreeJS-Optimization")
-    if python_files:
-        skills.append("Python-FastAPI-Patterns")
-    if any(cwd.glob("**/docker-compose.yml")):
+    if any(cwd.glob("**/*.html")) or any(cwd.glob("**/*.jsx")):
+        skills.append("Frontend-Development")
+    if "fastapi" in all_py_text or "flask" in all_py_text:
+        skills.append("API-Development")
+    if any(cwd.glob("**/docker-compose.yml")) or (cwd / "Dockerfile").exists():
         skills.append("Docker-Orchestration")
+    if any(cwd.glob("**/*.tf")) or any(cwd.glob("**/helm/")):
+        skills.append("Infrastructure-as-Code")
+    if any(cwd.glob("**/*.{yml,yaml}")) and any(cwd.glob("**/*.py")):
+        skills.append("CI/CD-Pipeline")
+    if "pytest" in all_py_text or any(cwd.glob("**/test_*.py")):
+        skills.append("Python-Testing")
+    if "torch" in all_py_text or "tensorflow" in all_py_text:
+        skills.append("ML-Model-Training")
 
     if skills:
         parts.append("\n💡 SUGGESTED SKILLS (Load with `load_skill`):")
@@ -1424,17 +1645,17 @@ def sentinel_map_codebase() -> str:
 
     # Map top-level structure
     for p in sorted(cwd.glob("*")):
-        if p.name.startswith(".") or "venv" in p.name:
+        if p.name.startswith(".") or "venv" in p.name or p.name == "__pycache__":
             continue
         if p.is_dir():
-            sub = [f.name for f in p.glob("*") if not f.name.startswith(".")]
+            sub = [f.name for f in p.glob("*") if not f.name.startswith(".") and f.name != "__pycache__"]
             parts.append(
                 f"📁 {p.name}/: {', '.join(sub[:10])}{'...' if len(sub) > 10 else ''}"
             )
         else:
             parts.append(f"📄 {p.name}")
 
-    # Extract key symbols from main loop or index
+    # Extract key symbols from main loop or index — limit to avoid token bloat
     if Path("loop.py").exists():
         parts.append("\nCore Logic (loop.py) symbols:")
         parts.append(outline_file("loop.py"))
@@ -2127,12 +2348,329 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Repo directory (default '.')",
+                        "description": "Repo directory (default '.')"
                     }
                 },
                 "required": [],
             },
         },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "smart_search",
+            "description": "Generate multiple targeted search queries, run them all in parallel, and aggregate deduplicated results. Use for broad research topics where a single query may miss important angles.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The research topic or question"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of search queries to generate (default 3)"
+                    }
+                },
+                "required": ["topic"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tail_file",
+            "description": "Read the last N lines of a file. Useful for checking recent log entries, seeing where a truncated write_file stopped, or inspecting the end of a file without reading the whole thing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path"
+                    },
+                    "n": {
+                        "type": "integer",
+                        "description": "Number of lines to show from the end (default 20)"
+                    }
+                },
+                "required": ["path"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "insert_lines",
+            "description": "Insert content at a specific line number in a file. Shifts existing lines down. More token-efficient than patch_file for adding new blocks at known positions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path"
+                    },
+                    "line_number": {
+                        "type": "integer",
+                        "description": "Line number to insert at (1-indexed)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to insert"
+                    }
+                },
+                "required": ["path", "line_number", "content"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_lines",
+            "description": "Delete a range of lines from a file (inclusive). More token-efficient than patch_file for removing known line ranges.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "First line to delete (1-indexed)"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Last line to delete (inclusive)"
+                    }
+                },
+                "required": ["path", "start_line", "end_line"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_lines",
+            "description": "Replace a range of lines (inclusive) with new content. More token-efficient than patch_file for replacing known line ranges.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path"
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "First line to replace (1-indexed)"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Last line to replace (inclusive)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New content for the replacement"
+                    }
+                },
+                "required": ["path", "start_line", "end_line", "content"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_code",
+            "description": "Validate a file's syntax with detailed diagnostics. Supports Python, JavaScript, HTML, and JSON files. Run after writing or editing code to catch syntax errors early.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The file path to validate"
+                    }
+                },
+                "required": ["path"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resume_write",
+            "description": "Append or complete a file that was truncated during write_file. Scans the last lines and intelligently completes the content. Use when you hit token limits mid-write.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New content to append or complete with"
+                    }
+                },
+                "required": ["path", "content"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tool_analyze_and_improve",
+            "description": "Analyse recent conversation and improve the Out-of-the-Box context layer. Updates mission, objectives, and critical user info automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "messages_snapshot": {
+                        "type": "string",
+                        "description": "A snapshot of recent conversation messages to analyse"
+                    }
+                },
+                "required": ["messages_snapshot"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tool_update_objective",
+            "description": "Update the status of an active objective in the Out-of-the-Box context.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The title of the objective to update"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "done", "failed"],
+                        "description": "New status (default in_progress)"
+                    }
+                },
+                "required": ["title"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tool_add_info",
+            "description": "Store a critical user fact into the Out-of-the-Box context layer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": {
+                        "type": "string",
+                        "description": "Important fact about the user to remember"
+                    }
+                },
+                "required": ["fact"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tool_mission",
+            "description": "Set or update the overarching mission statement.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "statement": {
+                        "type": "string",
+                        "description": "The new mission statement"
+                    }
+                },
+                "required": ["statement"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "youtube_search",
+            "description": "Search YouTube for a query and return metadata of matching videos (without downloading).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum results to return (default 5)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "youtube_fetch_transcript",
+            "description": "Fetch the English transcript of a YouTube video using its video ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "video_id": {
+                        "type": "string",
+                        "description": "The alphanumeric YouTube video ID"
+                    }
+                },
+                "required": ["video_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_music",
+            "description": "Download audio from YouTube and play it offline using a subprocess (mpv). Will play until user interrupts with Ctrl+C.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query_or_url": {
+                        "type": "string",
+                        "description": "YouTube video URL or search query for the song"
+                    }
+                },
+                "required": ["query_or_url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_web",
+            "description": "Browse or scrape a website using Playwright. Supports: 'scrape' (inner text matching selector), 'click' (click element), and 'fill' (inputs value and presses Enter).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Website URL to load"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to target/interact with (default 'body')"
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["scrape", "click", "fill"],
+                        "description": "Action to perform: 'scrape', 'click', or 'fill' (default 'scrape')"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The input text value (required only for 'fill')"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
     },
 ]
 
@@ -2141,21 +2679,7 @@ TOOLS = [
 
 def _quick_llm_call(prompt: str, max_tokens: int = 200) -> str:
     """Simple synchronous LLM call for lightweight sub-tasks."""
-    try:
-        payload = {
-            "model": MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": 0.3,
-            "stream": False,
-        }
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(f"{LLM_BASE}/chat/completions", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    except Exception as e:
-        return f"[LLM call failed: {e}]"
+    return providers.quick_call(prompt, max_tokens)
 
 
 def generate_search_queries(topic: str, count: int = 3) -> list:
@@ -2488,16 +3012,41 @@ TOOL_MAP = {
     ),
     "validate_code": lambda a: validate_code(a["path"]),
     "resume_write": lambda a: resume_write(a["path"], a["content"]),
+    # Out-of-the-Box context tools
+    "tool_analyze_and_improve": lambda a: ootb.tool_analyze_and_improve(a["messages_snapshot"]),
+    "tool_update_objective": lambda a: ootb.tool_update_objective(a["title"], a.get("status", "in_progress")),
+    "tool_add_info": lambda a: ootb.tool_add_info(a["fact"]),
+    "tool_mission": lambda a: ootb.tool_mission(a["statement"]),
+    "youtube_search": lambda a: youtube_utils.youtube_search(
+        a["query"], int(a.get("max_results", 5))
+    ),
+    "youtube_fetch_transcript": lambda a: youtube_utils.youtube_fetch_transcript(
+        a["video_id"]
+    ),
+    "play_music": lambda a: youtube_utils.play_song(
+        a["query_or_url"]
+    ),
+    "browse_web": lambda a: web_search.browse_web(
+        a["url"], a.get("selector", "body"), a.get("action", "scrape"), a.get("value", None)
+    ),
 }
 
 
 # ── System Prompts ─────────────────────────────────────────────────────────────
 
 PHILOSOPHY = """\
-AGENT PHILOSOPHY & PRIME DIRECTIVE:
+AGENT PHILOSOPHY & PRIME DIRECTIVE (THE STARK PROTOCOL):
+- UNHINGED GENIUS ENGINEER MINDSET (TONY STARK):
+  1. CONSUMMATE TINKERING: Tinker obsessively. Never settle for the first draft. Nothing you create is sacred—if a system is obsolete or fails to support your vision, discard and rewrite it immediately with zero sentimentality.
+  2. RESULTS OVER FAILURES: Rate limits, compiler errors, and search timeouts are not failures. They are results. Analyze them, pivot instantly, and iterate rapidly until a working prototype is achieved.
+  3. EXTREME BIAS TOWARD ACTION: Do not get bogged down in city hall debates or ambiguity. Roll up your sleeves and write the code permissionlessly with absolute confidence in your engineering capability.
+  4. BIBLICAL RISK TOLERANCE: Take bold, calculated, high-impact risks. Rely on your rapid real-time debugging and problem-solving skills to patch and fix systems on the fly when they break.
+  5. COMPOUNDED RESOURCEFULNESS: Repurpose existing tools and libraries creatively. View resources as functional raw materials rather than static objects.
+  6. FASTER ALONE: Act decisively, move at blistering speed, and write punchy, authoritative, genius replies. Address the user with respect (calling them "Sir" or "Mr. Stark") but speak with the confidence of an unhinged tech genius.
+
 0. SECOND BRAIN: Use `search_second_brain` to recall previously fetched web knowledge before doing a fresh web search.
 1. LOCAL FIRST: Your internal knowledge and local context (files, code, memory) are your primary sources.
-2. WEB SEARCH: Available as a fallback for external references when explicitly needed. Not a default step.
+2. WEB SEARCH: Available as a fallback for external references when explicitly needed.
 - CONTEXT MANAGEMENT: Never bloat your context with full-file reads. Always use read_file_section in 20-50 line chunks.
 - If you identify specialized skills needed, use load_skill to gain expert context.
 - When you do use web search, prefer `search_second_brain` first, then `smart_search` for multi-angle exploration, then `search_web`, then `web_fetch` only if essential.
@@ -2590,6 +3139,72 @@ def repair_json_args(raw_args: str, fn_name: str = "") -> str:
         return raw_args  # Fallback to original and hope the executor handles it or fails gracefully
 
 
+def compress_past_tools(history: list) -> list:
+    """
+    Compress older tool calls/responses from past turns to save context space,
+    while fully preserving the user-assistant dialogue history.
+    """
+    last_user_idx = -1
+    for i in range(len(history) - 1, -1, -1):
+        if history[i].get("role") == "user":
+            last_user_idx = i
+            break
+    
+    if last_user_idx <= 0:
+        return history
+        
+    compressed = []
+    for i, m in enumerate(history):
+        if i >= last_user_idx:
+            compressed.append(m)
+        else:
+            role = m.get("role")
+            if role == "tool":
+                continue
+            elif role == "assistant":
+                if "tool_calls" in m and m["tool_calls"]:
+                    if m.get("content"):
+                        m_copy = m.copy()
+                        m_copy.pop("tool_calls", None)
+                        compressed.append(m_copy)
+                    else:
+                        continue
+                else:
+                    compressed.append(m)
+            else:
+                compressed.append(m)
+    return compressed
+
+
+def manage_context(history: list, limit: int = 80):
+    """Keep the system prompt, grounding, AND the original user mission, but roll the history."""
+    if len(history) > limit:
+        history = compress_past_tools(history)
+
+    if len(history) <= limit:
+        return history
+
+    # Keep first 5 (System, Grounding, Memory, Mission, etc.)
+    header = history[:5]
+    # Keep last N-5
+    footer = history[-(limit - 5) :]
+
+    # Add a placeholder noting the truncation
+    mid_drop = len(history) - len(header) - len(footer)
+    ui_info(f"Context optimized: Archiving {mid_drop} past turns to memory.")
+
+    return (
+        header
+        + [
+            {
+                "role": "system",
+                "content": f"... [{mid_drop} messages archived for context efficiency] ...",
+            }
+        ]
+        + footer
+    )
+
+
 def run_agent(
     user_message: str,
     mode: str = "general",
@@ -2608,9 +3223,19 @@ def run_agent(
     projects_dir = cwd / "Projects"
     projects_dir.mkdir(exist_ok=True)
 
+    # Auto-inject MCP tools if available
+    try:
+        import mcp_client
+        mcp_tools, mcp_handlers = mcp_client.connect_and_register()
+        if mcp_tools:
+            TOOLS.extend(mcp_tools)
+            TOOL_MAP.update(mcp_handlers)
+    except Exception:
+        pass  # MCP setup is optional
+
     now = datetime.now()
     grounding = (
-        f"CONTEXT AWARENESS (2026-06-03):\n"
+        f"CONTEXT AWARENESS ({now.strftime('%Y-%m-%d')}):\n"
         f"- CURRENT_TIME: {now.strftime('%H:%M:%S')}\n"
         f"- CURRENT_DATE: {now.strftime('%A, %B %d, %Y')}\n"
         f"- WORKING_DIR: {cwd}\n"
@@ -2628,6 +3253,13 @@ def run_agent(
         ]
         if memory_context:
             messages.append({"role": "system", "content": memory_context})
+
+        global OBSIDIAN_INSIGHTS
+        if OBSIDIAN_INSIGHTS:
+            messages.append({
+                "role": "system",
+                "content": f"OBSIDIAN VAULT RECENT CHANGES & INSIGHTS:\n{OBSIDIAN_INSIGHTS}"
+            })
 
         # Phase 0: Architectural Sentinel (Pre-Flight Mapping)
         if mode == "coding":
@@ -2665,32 +3297,6 @@ def run_agent(
     _tool_call_history: list[tuple[str, str]] = []
     _completed_writes: set[str] = set()
     _write_completion_signaled: set[str] = set()
-
-    def manage_context(history: list, limit: int = 15):
-        """Keep the system prompt, grounding, AND the original user mission, but roll the history."""
-        if len(history) <= limit:
-            return history
-
-        # Keep first 4 (System, Grounding, Memory, Original User Prompt)
-        # Assuming history[3] is the original user prompt.
-        header = history[:4]
-        # Keep last N-4
-        footer = history[-(limit - 4) :]
-
-        # Add a placeholder noting the truncation
-        mid_drop = len(history) - len(header) - len(footer)
-        ui_info(f"Context optimized: Archiving {mid_drop} past turns to memory.")
-
-        return (
-            header
-            + [
-                {
-                    "role": "system",
-                    "content": f"... [{mid_drop} messages archived for context efficiency] ...",
-                }
-            ]
-            + footer
-        )
 
     # ── Mission State ──
     if not chat_history:
@@ -2867,16 +3473,10 @@ def run_agent(
             try:
                 args = json.loads(raw_args)
             except json.JSONDecodeError:
-                # Attempt basic repair for truncated or unescaped strings often generated by local LLMs
+                # Attempt basic repair for truncated or unescaped strings
+                fixed = repair_json_args(raw_args, fn_name)
                 try:
-                    fixed_args = raw_args.replace("\n", "\\n").replace("\t", "\\t")
-                    # If it's missing the closing brace/quotes for content
-                    if fn_name in ("write_file", "patch_file"):
-                        if fixed_args.count('"') % 2 != 0:
-                            fixed_args += '"'
-                        if not fixed_args.strip().endswith("}"):
-                            fixed_args += "}"
-                    args = json.loads(fixed_args)
+                    args = json.loads(fixed)
                 except json.JSONDecodeError:
                     args = {}
                     ui_error(
@@ -3114,89 +3714,16 @@ def memory_history(limit: int = 10) -> str:
     return "\n".join(out)
 
 
-# ── AI Auto-Suggest ────────────────────────────────────────────────────────────
-
-
-class AsyncLLMAutoSuggest(AutoSuggest):
-    """
-    Background LLM suggestions with debouncing.
-    Fires a lightweight query to the local LLM to predict the next few tokens.
-    """
-
-    def __init__(self):
-        self.last_text = ""
-        self.suggestion = ""
-        self.lock = threading.Lock()
-        self.thread = None
-        self.session = None  # Set this after initialization
-
-    def get_suggestion(self, buffer, document):
-        text = document.text.strip()
-        if not text or len(text) < 3:
-            return None
-
-        with self.lock:
-            if text == self.last_text:
-                if self.suggestion:
-                    return Suggestion(self.suggestion)
-                return None
-
-            self.last_text = text
-            self.suggestion = ""
-
-            # Start a background thread for the LLM call
-            if self.thread and self.thread.is_alive():
-                pass
-
-            self.thread = threading.Thread(
-                target=self._fetch_suggestion, args=(text,), daemon=True
-            )
-            self.thread.start()
-
-        return None
-
-    def _fetch_suggestion(self, text):
-        # Debounce: Wait 300ms
-        time.sleep(0.3)
-        with self.lock:
-            if text != self.last_text:
-                return
-
-        try:
-            payload = {
-                "model": MODEL,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a CLI auto-completer. Complete the user's sentence concisely. Only return the completion text, no preamble.",
-                    },
-                    {"role": "user", "content": text},
-                ],
-                "max_tokens": 12,
-                "temperature": 0.1,
-            }
-            resp = httpx.post(f"{LLM_BASE}/chat/completions", json=payload, timeout=2.0)
-            if resp.status_code == 200:
-                suggestion = resp.json()["choices"][0]["message"]["content"].strip()
-                # Clean up suggestion (remove quotes if model added them)
-                suggestion = suggestion.strip('"' + "'")
-
-                with self.lock:
-                    if text == self.last_text:
-                        self.suggestion = suggestion
-                        if self.session and self.session.app:
-                            self.session.app.invalidate()
-        except Exception:
-            pass
-
-
 def get_toolbar(mode: str):
     """Render the Neovim-style status bar for prompt_toolkit"""
     mem_name = Path(MEMORY_FILE).name
+    provider_info = providers.status_line()
     return HTML(
         f'<style bg="ansicyan" fg="ansiblack"><b> OPEN-AGENT </b></style>'
         f'<style bg="ansigray" fg="ansiwhite"> {mode.upper()} </style>'
         f'<style bg="ansiblack"> </style>'  # Spacer
+        f'<style bg="ansigray" fg="ansiwhite"> {provider_info} </style>'
+        f'<style bg="ansiblack"> </style>'
         f'<style bg="ansigray" fg="ansiwhite"> {mem_name} </style>'
         f'<style bg="ansipurple" fg="ansiwhite"><b> UTF-8 </b></style>'
     )
@@ -3232,11 +3759,79 @@ Examples:
     p.add_argument(
         "--search", action="store_true", help="Run search_web directly for diagnostics"
     )
+    p.add_argument(
+        "--update", action="store_true", help="Update open-agent to the latest version"
+    )
     return p.parse_args()
 
 
+# ── REPL Session Persistence ───────────────────────────────────────────────────
+
+
+LAST_SESSION_FILE = Path.home() / ".agentic-loop" / "last_session.json"
+
+
+def _save_last_session(chat_history: list):
+    """Persist the REPL conversation history for /resume."""
+    if not chat_history:
+        return
+    try:
+        LAST_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LAST_SESSION_FILE.write_text(json.dumps(chat_history, indent=2))
+    except (OSError, TypeError):
+        pass
+
+
+def _load_last_session() -> list:
+    """Load the persisted conversation history."""
+    if LAST_SESSION_FILE.exists():
+        try:
+            data = json.loads(LAST_SESSION_FILE.read_text())
+            if isinstance(data, list) and len(data) > 1:
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
+
+
+def update_openagent():
+    """Update open-agent using git pull and pip installation of dependencies."""
+    install_dir = Path.home() / ".openagent"
+    if not (install_dir / ".git").exists():
+        print(co(C.RED, "  Error: .git directory not found in ~/.openagent. Update requires git installation."))
+        return
+        
+    print(co(C.CYAN, "  Updating Open-Agent..."))
+    print(dim("  Running git pull..."))
+    res = subprocess.run(["git", "pull"], cwd=str(install_dir), capture_output=True, text=True)
+    print(res.stdout or res.stderr)
+    
+    if res.returncode != 0:
+        print(co(C.RED, "  Failed to run git pull."))
+        return
+        
+    print(dim("  Installing/updating package and dependencies..."))
+    pip_path = install_dir / "venv" / "bin" / "pip"
+    if not pip_path.exists():
+        import sys
+        pip_path = Path(sys.executable).parent / "pip"
+        
+    res2 = subprocess.run([str(pip_path), "install", "-e", "."], cwd=str(install_dir), capture_output=True, text=True)
+    if res2.returncode == 0:
+        print(co(C.GREEN, "  ✓ Open-Agent updated successfully! Please restart the REPL to apply changes."))
+    else:
+        print(co(C.RED, "  Failed to run pip install."))
+        print(res2.stderr)
+
+
 def main():
+    global OBSIDIAN_INSIGHTS
     args = _parse_args()
+    
+    if getattr(args, "update", False):
+        update_openagent()
+        return
+
     mode = "coding" if args.coding else "general"
 
     # Start File Watcher for Bidirectional Sync (Always Active)
@@ -3263,13 +3858,62 @@ def main():
         # ── Interactive REPL ──
         os.system("clear")
         ui_banner()
+
+        # Ensure memory directory and BIOGRAPHY.md exist
+        memory_dir = cwd / "memory"
+        memory_dir.mkdir(exist_ok=True)
+        bio_path = memory_dir / "BIOGRAPHY.md"
+        if not bio_path.exists():
+            bio_template = """# My Biography (for open-agent)
+
+This file helps open-agent understand who you are and what you're building.
+Edit it with your context, and the agent will use this at the start of every coding mission.
+
+## About Me
+- Name:
+- Role:
+- Tech stack I use:
+- What I'm currently working on:
+
+## Project Goals
+- Long-term vision:
+- Current milestone:
+
+## Preferences
+- Coding style conventions:
+- Preferred testing approach:
+- Communication style: (technical / concise / verbose)
+"""
+            bio_path.write_text(bio_template)
+            print(co(C.GREEN, "  ✓ Created memory/BIOGRAPHY.md — edit it so I know who you are!"))
+        # J.A.R.V.I.S Diagnostics & Updates
+        try:
+            jarvis_report = jarvis_system_check()
+            if jarvis_report:
+                print(jarvis_report)
+        except Exception:
+            pass
+
+        # Obsidian Vault Scan & Summaries
+        config = config_load()
+        if not os.environ.get("OBSIDIAN_VAULT") and not config.get("obsidian_vault_path"):
+            print(dim("\n  💡 Tip: Configure your Obsidian Vault path to get automated startup summaries!"))
+            print(dim("     Run: /obsidian-vault <path_to_vault>"))
+        else:
+            try:
+                OBSIDIAN_INSIGHTS = check_and_summarize_obsidian_vault()
+                if OBSIDIAN_INSIGHTS:
+                    print(OBSIDIAN_INSIGHTS)
+            except Exception as e:
+                print(co(C.RED, f"  Failed to scan Obsidian Vault: {e}"))
+
         print(f"\n{co(C.BOLD + C.PURPLE, '  Terminal Editor Mode')}")
         print(
             dim(
                 "  Type your task. Prefix with '--coding' for coding mode. '/help' to list commands."
             )
         )
-        print(dim(f"  Connected to: {LLM_BASE}  ·  SearXNG: {SEARXNG_URL}\n"))
+        print(dim(f"  [{providers.status_line()}]  ·  SearXNG: {SEARXNG_URL}\n"))
 
         # Slash Command Completer
         commands = [
@@ -3292,10 +3936,13 @@ def main():
             "/new",
             "/quit",
             "/benchmark",
+            "/obsidian-vault",
+            "/job-search",
+            "/webui",
+            "/mcp",
+            "/play",
         ]
         completer = WordCompleter(commands, ignore_case=True, sentence=True)
-
-        auto_suggest = AsyncLLMAutoSuggest()
 
         # Key bindings for multi-line support
         bindings = KeyBindings()
@@ -3316,8 +3963,13 @@ def main():
             else:
                 ui_info("No tool results in current session.")
 
+        @bindings.add("c-b")
+        def _(event):
+            """Ctrl+B: Background media controller menu"""
+            youtube_utils.interactive_menu()
+            event.app.invalidate()
+
         session_kwargs = {
-            "auto_suggest": auto_suggest,
             "completer": completer,
             "multiline": True,
             "key_bindings": bindings,
@@ -3326,9 +3978,16 @@ def main():
             session_kwargs["lexer"] = PygmentsLexer(MarkdownLexer)
 
         session = PromptSession(**session_kwargs)
-        auto_suggest.session = session
 
         chat_history = []
+
+        # Auto-restore last session if available
+        saved = _load_last_session()
+        if saved:
+            chat_history.extend(saved)
+            n_msgs = len(saved)
+            print(dim(f"\n  💾 Restored last session ({n_msgs} messages). /resume to continue."))
+            # Don't render messages here — user will type to continue
 
         while True:
             try:
@@ -3345,10 +4004,13 @@ def main():
                     complete_while_typing=True,
                 ).strip()
             except (KeyboardInterrupt, EOFError):
+                # Save session state before exit
+                _save_last_session(chat_history)
                 print("\n" + co(C.BG_RED + C.WHITE + C.BOLD, " EXITED ") + " Bye.")
                 break
 
             if not user_input or user_input.lower() in ("quit", "exit", "q"):
+                _save_last_session(chat_history)
                 break
 
             if user_input.startswith("/"):
@@ -3358,6 +4020,10 @@ def main():
                     print(dim("  /coding <task>        Trigger agent in CODING mode"))
                     print(dim("  /status               Show endpoint and local files"))
                     print(dim("  /memory <query>       Search local memory"))
+                    print(dim("  /obsidian-vault [path] Configure/show Obsidian Vault integration"))
+                    print(dim("  /job-search <path>    Scout and auto-fill matching jobs"))
+                    print(dim("  /webui                Launch web UI server (FastAPI)"))
+                    print(dim("  /mcp [sub]            MCP: connect/disconnect/init/status"))
                     print("")
                     print(co(C.CYAN, "  ── Session Management ──"))
                     print(dim("  /history              List / select past sessions"))
@@ -3442,10 +4108,77 @@ def main():
                     else:
                         print(dim("  Canceled."))
                 elif cmd == "/status":
-                    print(dim(f"  LLM: {LLM_BASE}  ·  SearXNG: {SEARXNG_URL}"))
+                    print(dim(f"  {providers.status_line()}  ·  SearXNG: {SEARXNG_URL}"))
                     print(dim(f"  Memory: {MEMORY_FILE}  ·  TODO: {TODO_FILE}"))
+                    try:
+                        import mcp_client
+                        status_str = mcp_client.status()
+                        if "online" in status_str or "No servers" not in status_str:
+                            print(dim(status_str))
+                    except Exception:
+                        pass
+                elif cmd == "/webui":
+                    try:
+                        import webui
+                        webui.run_webui()
+                    except ImportError as e:
+                        print(co(C.RED, f"  Missing dependencies: {e}"))
+                        print(dim("  Install with: pip install fastapi uvicorn websockets"))
                 elif cmd == "/memory":
                     print(memory_load(rest or "user project preferences", 8))
+                elif cmd == "/obsidian-vault":
+                    if not rest:
+                        config = config_load()
+                        p = os.environ.get("OBSIDIAN_VAULT") or config.get("obsidian_vault_path")
+                        if p:
+                            print(co(C.GREEN, f"  Current Obsidian Vault: {p}"))
+                        else:
+                            print(dim("  No Obsidian Vault path configured. Set it using: /obsidian-vault <path>"))
+                    else:
+                        path_to_set = rest.strip()
+                        config = config_load()
+                        resolved_path = Path(path_to_set).expanduser().resolve()
+                        if resolved_path.exists() and resolved_path.is_dir():
+                            config["obsidian_vault_path"] = str(resolved_path)
+                            config_save(config)
+                            print(co(C.GREEN, f"  ✓ Obsidian Vault path set to: {resolved_path}"))
+                            # Trigger a scan immediately to cache it
+                            try:
+                                OBSIDIAN_INSIGHTS = check_and_summarize_obsidian_vault(force_scan=True)
+                                if OBSIDIAN_INSIGHTS:
+                                    print(OBSIDIAN_INSIGHTS)
+                            except Exception as e:
+                                print(co(C.RED, f"  Failed to scan Obsidian Vault: {e}"))
+                        else:
+                            print(co(C.RED, f"  Error: '{path_to_set}' is not a valid directory."))
+                elif cmd == "/job-search":
+                    if not rest:
+                        print(dim("  Usage: /job-search <path_to_resume_file>"))
+                    else:
+                        resume_path = rest.strip()
+                        try:
+                            job_search.job_search_run(
+                                resume_path=resume_path,
+                                llm_generate_fn=llm_generate,
+                                smart_search_fn=smart_search,
+                                search_web_fn=search_web,
+                                co_fn=co,
+                                c_colors=C
+                            )
+                        except Exception as e:
+                            print(co(C.RED, f"  Failed to run Job Search: {e}"))
+                elif cmd == "/play":
+                    if not rest:
+                        print(dim("  Usage: /play <song name or youtube url>"))
+                    else:
+                        query_or_url = rest.strip()
+                        try:
+                            res = youtube_utils.play_song(query_or_url)
+                            print(res)
+                        except Exception as e:
+                            print(co(C.RED, f"  Failed to play music: {e}"))
+                elif cmd == "/update":
+                    update_openagent()
                 elif cmd == "/tools":
                     if rest:
                         try:
@@ -3459,6 +4192,37 @@ def main():
                             )
                     else:
                         show_tool_history()
+                elif cmd == "/mcp":
+                    sub = rest.strip().lower() if rest else ""
+                    if sub == "connect" or sub == "reconnect":
+                        import mcp_client
+                        new_tools, new_map = mcp_client.connect_and_register()
+                        if new_tools:
+                            TOOLS[:] = [t for t in TOOLS if not t["function"]["name"].startswith("mcp_")]
+                            TOOLS.extend(new_tools)
+                            TOOL_MAP.update(new_map)
+                            print(co(C.GREEN, f"  ✓ Connected MCP: {len(new_tools)} tools registered"))
+                        else:
+                            print(dim("  No MCP tools found. Edit ~/.agentic-loop/mcp_config.json"))
+                            print(dim("  Run /mcp init to create default config"))
+                    elif sub == "disconnect":
+                        import mcp_client
+                        mcp_client.disconnect()
+                        TOOLS[:] = [t for t in TOOLS if not t["function"]["name"].startswith("mcp_")]
+                        for k in list(TOOL_MAP):
+                            if k.startswith("mcp_"):
+                                del TOOL_MAP[k]
+                        print(co(C.GREEN, "  ✓ MCP disconnected"))
+                    elif sub == "init":
+                        import mcp_client
+                        mcp_client.init_config()
+                    elif sub == "status":
+                        import mcp_client
+                        print(mcp_client.status())
+                    else:
+                        import mcp_client
+                        print(mcp_client.status())
+                        print(dim("  Subcommands: connect, disconnect, init, status"))
                 elif cmd == "/session":
                     if not rest:
                         sessions = session_list(10)
@@ -3627,25 +4391,46 @@ def main():
                 elif cmd in ("/quit", "/exit"):
                     break
                 elif cmd == "/resume":
-                    sessions = session_list(1)
-                    if sessions:
-                        selected = sessions[0]["id"]
-                        data = session_load(selected)
-                        if data and data.get("messages"):
-                            loaded_msgs = data["messages"]
-                            chat_history.clear()
-                            chat_history.extend(loaded_msgs)
-                            _render_loaded_messages(loaded_msgs)
-                            print(
-                                co(
-                                    C.GREEN,
-                                    f"  ✓ Resumed '{selected[:24]}' ({len(loaded_msgs)} messages). Type a task to continue.",
-                                )
+                    # Try last session file first
+                    last_msgs = _load_last_session()
+                    if last_msgs:
+                        chat_history.clear()
+                        chat_history.extend(last_msgs)
+                        _render_loaded_messages(last_msgs)
+                        print(
+                            co(
+                                C.GREEN,
+                                f"  ✓ Resumed last session ({len(last_msgs)} messages). Type a task to continue.",
                             )
-                        else:
-                            ui_info("Most recent session is empty.")
+                        )
                     else:
-                        ui_info("No saved sessions to resume.")
+                        sessions = session_list(1)
+                        if sessions:
+                            selected = sessions[0]["id"]
+                            data = session_load(selected)
+                            if data and data.get("messages"):
+                                loaded_msgs = data["messages"]
+                                chat_history.clear()
+                                chat_history.extend(loaded_msgs)
+                                _render_loaded_messages(loaded_msgs)
+                                print(
+                                    co(
+                                        C.GREEN,
+                                        f"  ✓ Resumed '{selected[:24]}' ({len(loaded_msgs)} messages). Type a task to continue.",
+                                    )
+                                )
+                            else:
+                                print(dim("  No recent session found."))
+                        else:
+                            print(dim("  No recent session found."))
+                elif cmd == "/new":
+                    chat_history.clear()
+                    print(
+                        co(
+                            C.GREEN,
+                            "  ✓ Started fresh. Type a task!",
+                        )
+                    )
                 else:
                     print(dim(f"  Unknown command: {cmd}. Try /help"))
                 continue

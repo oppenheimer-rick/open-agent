@@ -1,4 +1,4 @@
-.PHONY: install install-dev venv clean lint
+.PHONY: install install-dev venv clean lint bench bench-quick test test-runner
 
 # Default Python
 PYTHON := python3
@@ -23,7 +23,32 @@ venv:
 	@echo "  Virtualenv created. Activate with:  source $(VENV_DIR)/bin/activate"
 
 lint:
-	ruff check loop.py web_search.py memory.py out_of_the_box.py
+	ruff check loop.py web_search.py memory.py out_of_the_box.py providers.py webui.py mcp_client.py
+
+bench:
+	@echo "Running all benchmarks..."
+	$(PYTHON) -u -c "from benchmark.agentic_bench import run_all; run_all()"
+
+bench-quick:
+	@echo "Running quick benchmark (3 tasks)..."
+	$(PYTHON) -u -c "from benchmark.agentic_bench import run_quick; run_quick()"
+
+test-runner:
+	@echo "Running agentic bench with runner..."
+	$(PYTHON) -u -m benchmark.agentic_bench
+
+# Quick smoke test: verify the agent can import and all modules are healthy
+test:
+	@echo "Running import tests..."
+	$(PYTHON) -c "
+import providers
+import memory
+import mcp_client
+print('  ✓ providers — ok')
+print('  ✓ memory — ok')
+print('  ✓ mcp_client — ok')
+print('All imports passed.')
+" && echo ""
 
 clean:
 	rm -rf $(VENV_DIR)

@@ -88,7 +88,7 @@ def _searx_json_search(client: httpx.Client, query: str, max_results: int) -> tu
             "language": "en-US",
             "categories": "general",
         },
-        timeout=15,
+        timeout=0.8,
     )
     if r.status_code == 403:
         return [], "json-disabled"
@@ -114,7 +114,7 @@ def _searx_html_search(client: httpx.Client, query: str, max_results: int) -> tu
             "language": "en-US",
             "categories": "general",
         },
-        timeout=15,
+        timeout=0.8,
     )
     r.raise_for_status()
     parser = SearxHTMLParser()
@@ -163,7 +163,7 @@ def _mojeek_search(client: httpx.Client, query: str, max_results: int) -> list:
             "https://www.mojeek.com/search",
             params={"q": query},
             headers=headers,
-            timeout=10,
+            timeout=0.8,
         )
         r.raise_for_status()
 
@@ -187,9 +187,76 @@ def _mojeek_search(client: httpx.Client, query: str, max_results: int) -> list:
         return []
 
 
+def _ddg_lite_search(client: httpx.Client, query: str, max_results: int) -> list:
+    """Fallback search using DuckDuckGo Lite (no JavaScript, scrape-friendly)."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    try:
+        from urllib.parse import unquote
+        # DuckDuckGo Lite expects URL-encoded form data
+        r = client.post(
+            "https://lite.duckduckgo.com/lite/",
+            data={"q": query},
+            headers=headers,
+            timeout=0.8,
+        )
+        r.raise_for_status()
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        
+        link_tags = soup.find_all("a", class_="result-link")
+        for link_tag in link_tags:
+            parent_tr = link_tag.find_parent("tr")
+            if parent_tr and "result-sponsored" in parent_tr.get("class", []):
+                continue
+                
+            title = link_tag.get_text(strip=True)
+            url = link_tag.get("href", "")
+            
+            if not title or not url:
+                continue
+            if "duckduckgo.com/y.js" in url or "duckduckgo-help-pages" in url or title.lower() == "more info":
+                continue
+                
+            if "/l/?uddg=" in url:
+                m = re.search(r"uddg=([^&]+)", url)
+                if m:
+                    url = unquote(m.group(1))
+            
+            snippet = ""
+            if parent_tr:
+                next_tr = parent_tr.find_next_sibling("tr")
+                if next_tr:
+                    snippet_tag = next_tr.find(class_="result-snippet")
+                    if snippet_tag:
+                        snippet = snippet_tag.get_text(strip=True)
+                    else:
+                        next_next_tr = next_tr.find_next_sibling("tr")
+                        if next_next_tr:
+                            snippet_tag = next_next_tr.find(class_="result-snippet")
+                            if snippet_tag:
+                                snippet = snippet_tag.get_text(strip=True)
+                                
+            results.append({
+                "title": title,
+                "url": url,
+                "content": snippet,
+                "query": query
+            })
+            if len(results) >= max_results:
+                break
+        return results
+    except Exception:
+        return []
+
+
 def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
     """
-    Agentic SearXNG search with Mojeek fallback.
+    Agentic SearXNG search with Mojeek and DuckDuckGo Lite fallbacks.
     """
     diagnostics = []
     all_results = []
@@ -236,6 +303,21 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
                                 all_results.append(res)
                     if len(all_results) >= max_results:
                         break
+
+            if not all_results:
+                diagnostics.append("mojeek-failed:trying-ddg")
+                for variant in variants[:2]:
+                    ddg_results = _ddg_lite_search(client, variant, max_results)
+                    if ddg_results:
+                        diagnostics.append(f"ddg:{variant}:{len(ddg_results)}")
+                        for res in ddg_results:
+                            url = res.get("url", "")
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                res["score"] = _score_result(res, query)
+                                all_results.append(res)
+                    if len(all_results) >= max_results:
+                        break
     except KeyboardInterrupt:
         raise AgentInterrupted()
 
@@ -244,7 +326,7 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
 
     if not all_results:
         return (
-            "No results found after trying SearXNG and Mojeek.\n"
+            "No results found after trying SearXNG, Mojeek, and DuckDuckGo Lite.\n"
             "Diagnostics: " + "; ".join(diagnostics[:8]) + "\n"
             "Possible issues: Search engines are rate-limiting or blocking automated access."
         )
@@ -532,3 +614,64 @@ def preflight_query(user_message: str, mode: str = "general") -> str:
     if len(q) > 200:
         q = q[:200]
     return q
+
+
+def browse_web(url: str, selector: str = "body", action: str = "scrape", value: str = None) -> str:
+    """Browse or scrape a website using Playwright.
+    
+    Args:
+        url: The website URL to load.
+        selector: CSS selector to query/interact with (default 'body').
+        action: Action to perform: 'scrape' (text content), 'click' (click element), or 'fill' (type value).
+        value: The text value to input (only required for 'fill').
+        
+    Returns:
+        The text content of the target element, or page summary after interaction.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "ERROR: Playwright is not installed. Run 'pip install playwright' and 'playwright install'."
+        
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            page.set_default_timeout(10000) # 10 seconds
+            page.goto(url, wait_until="domcontentloaded")
+            
+            if action == "scrape":
+                page.wait_for_selector(selector, timeout=5000)
+                element = page.query_selector(selector)
+                if not element:
+                    return f"ERROR: Element matching selector '{selector}' not found."
+                text = element.inner_text()
+                browser.close()
+                return text.strip()
+                
+            elif action == "click":
+                page.wait_for_selector(selector, timeout=5000)
+                page.click(selector)
+                page.wait_for_timeout(2000)
+                title = page.title()
+                content = page.locator("body").inner_text()
+                browser.close()
+                return f"Success: Clicked '{selector}'. New page title: '{title}'.\nContent summary:\n{content[:1500]}"
+                
+            elif action == "fill":
+                if not value:
+                    return "ERROR: 'value' parameter is required for 'fill' action."
+                page.wait_for_selector(selector, timeout=5000)
+                page.fill(selector, value)
+                page.press(selector, "Enter")
+                page.wait_for_timeout(2000)
+                title = page.title()
+                content = page.locator("body").inner_text()
+                browser.close()
+                return f"Success: Filled '{selector}' with '{value}' and pressed Enter. Page title: '{title}'.\nContent summary:\n{content[:1500]}"
+                
+            else:
+                browser.close()
+                return f"ERROR: Unsupported action '{action}'. Supported actions: scrape, click, fill."
+    except Exception as e:
+        return f"ERROR: Playwright operation failed: {e}"

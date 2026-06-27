@@ -123,6 +123,24 @@ textarea { width: 100%; border: none; outline: none; background: transparent; pa
   #sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0,0,0,0.5); }
   .msg-bubble.user { max-width: 95%; }
 }
+.suggestion-item {
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 150ms;
+}
+.suggestion-item:hover, .suggestion-item.active {
+  background: var(--bg-hover);
+}
+.suggestion-item .cmd-text {
+  font-weight: 600;
+  color: var(--accent);
+}
+.suggestion-item .cmd-desc {
+  color: var(--text-secondary);
+}
 </style>
 </head>
 <body>
@@ -158,8 +176,9 @@ textarea { width: 100%; border: none; outline: none; background: transparent; pa
     </div>
 
     <div id="composer-area">
-      <div class="composer-box">
-        <textarea id="composer-input" rows="1" placeholder="Message open-agent..." oninput="autoResize(this)" onkeydown="handleKeydown(event)"></textarea>
+      <div class="composer-box relative">
+        <div id="command-suggestions" class="absolute bottom-full left-0 w-full mb-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-lg hidden max-h-48 overflow-y-auto z-50"></div>
+        <textarea id="composer-input" rows="1" placeholder="Message open-agent..." oninput="handleInput(this)" onkeydown="handleKeydown(event)"></textarea>
         <div class="composer-toolbar">
           <div class="flex gap-2">
             <button class="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded"><i data-lucide="paperclip" class="w-4 h-4"></i></button>
@@ -445,6 +464,113 @@ function startNewChat() {
   document.getElementById('message-list').innerHTML = document.getElementById('empty-state').outerHTML;
   renderHistory();
 }
+
+// Slash command autocomplete menu logic
+const slashCommands = [
+  { cmd: "/coding", desc: "Trigger agent in CODING mode" },
+  { cmd: "/status", desc: "Show status" },
+  { cmd: "/memory", desc: "Search local memory" },
+  { cmd: "/obsidian-vault", desc: "Configure/show Obsidian Vault integration" },
+  { cmd: "/job-search", desc: "Scout and score matching jobs" },
+  { cmd: "/history", desc: "List / select past sessions" },
+  { cmd: "/resume", desc: "Continue the most recent session" },
+  { cmd: "/session", desc: "Load a session by ID" },
+  { cmd: "/new", desc: "Start a fresh session" },
+  { cmd: "/clear", desc: "Alias for /new" },
+  { cmd: "/rename-session", desc: "Rename a session" },
+  { cmd: "/search-sessions", desc: "Full-text search across all sessions" },
+  { cmd: "/help", desc: "Show commands" },
+  { cmd: "/quit", desc: "Quit session" }
+];
+
+let activeSuggestionIdx = -1;
+let filteredCommands = [];
+
+function handleInput(el) {
+  autoResize(el);
+  const val = el.value;
+  const suggestionsBox = document.getElementById('command-suggestions');
+  
+  // Show suggestions if typing "/" at the start of textarea or after a newline
+  const cursorIdx = el.selectionStart;
+  const textBeforeCursor = val.slice(0, cursorIdx);
+  const lastLine = textBeforeCursor.split('\n').pop();
+  
+  if (lastLine.startsWith('/')) {
+    const prefix = lastLine.toLowerCase();
+    filteredCommands = slashCommands.filter(c => c.cmd.startsWith(prefix));
+    
+    if (filteredCommands.length > 0) {
+      activeSuggestionIdx = 0;
+      renderSuggestions();
+      suggestionsBox.classList.remove('hidden');
+    } else {
+      suggestionsBox.classList.add('hidden');
+    }
+  } else {
+    suggestionsBox.classList.add('hidden');
+  }
+}
+
+function renderSuggestions() {
+  const suggestionsBox = document.getElementById('command-suggestions');
+  suggestionsBox.innerHTML = filteredCommands.map((c, idx) => {
+    const active = idx === activeSuggestionIdx ? 'active' : '';
+    return `<div class="suggestion-item ${active}" onclick="selectSuggestion(${idx})">
+              <span class="cmd-text">${c.cmd}</span>
+              <span class="cmd-desc">${c.desc}</span>
+            </div>`;
+  }).join('');
+}
+
+function selectSuggestion(idx) {
+  if (idx < 0 || idx >= filteredCommands.length) return;
+  const cmdObj = filteredCommands[idx];
+  const el = document.getElementById('composer-input');
+  const val = el.value;
+  const cursorIdx = el.selectionStart;
+  const textBeforeCursor = val.slice(0, cursorIdx);
+  const textAfterCursor = val.slice(cursorIdx);
+  
+  const lines = textBeforeCursor.split('\n');
+  lines[lines.length - 1] = cmdObj.cmd + ' '; // Replace the partial command with the full command and a space
+  
+  el.value = lines.join('\n') + textAfterCursor;
+  el.focus();
+  document.getElementById('command-suggestions').classList.add('hidden');
+  autoResize(el);
+}
+
+// Override handleKeydown
+const originalHandleKeydown = handleKeydown;
+handleKeydown = function(e) {
+  const suggestionsBox = document.getElementById('command-suggestions');
+  const isSuggestionsOpen = !suggestionsBox.classList.contains('hidden');
+  
+  if (isSuggestionsOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeSuggestionIdx = (activeSuggestionIdx + 1) % filteredCommands.length;
+      renderSuggestions();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeSuggestionIdx = (activeSuggestionIdx - 1 + filteredCommands.length) % filteredCommands.length;
+      renderSuggestions();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      selectSuggestion(activeSuggestionIdx);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      suggestionsBox.classList.add('hidden');
+    }
+  } else {
+    // Call original key handler
+    if(e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+};
 
 // Init
 fetchConversations();

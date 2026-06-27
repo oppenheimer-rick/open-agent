@@ -9,7 +9,12 @@ setup(
         "mission",
         "out_of_the_box",
         "web_search",
+        "youtube_utils",
+        "providers",
+        "webui",
+        "mcp_client",
     ],
+    packages=["job_search"],
     python_requires=">=3.10",
     install_requires=[
         "httpx",
@@ -17,6 +22,11 @@ setup(
         "watchdog",
         "beautifulsoup4",
         "pygments",
+        "youtube-transcript-api",
+        "yt-dlp",
+        "playwright",
+        "pyee",
+        "greenlet",
     ],
     entry_points={
         "console_scripts": [

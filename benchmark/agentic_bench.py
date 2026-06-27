@@ -562,3 +562,16 @@ def run_agentic_bench(max_instances: int | None = None) -> dict:
 
 if __name__ == "__main__":
     run_agentic_bench()
+
+
+# ── Convenience functions for make bench ───────────────────────────────────────
+
+
+def run_all(max_instances: int | None = None):
+    """Run the full benchmark. Called from make bench."""
+    run_agentic_bench(max_instances)
+
+
+def run_quick():
+    """Run the first 3 tasks for a quick smoke test. Called from make bench-quick."""
+    run_agentic_bench(max_instances=3)

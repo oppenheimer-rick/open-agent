@@ -3,3 +3,9 @@ prompt_toolkit
 beautifulsoup4
 watchdog
 pygments
+# Web UI (optional)
+fastapi
+uvicorn
+websockets
+# Job search (optional)
+playwright

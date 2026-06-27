@@ -74,3 +74,18 @@
 - **Colour-coded output** — CYAN for assistant, GRAY for thinking, GREEN for success, RED for errors.
 - **Compact tool logs** — One-line status indicators for file operations.
 - **Auto-scroll** — Scroll-to-bottom on new content.
+
+## Media & Playback Integration
+- **`/play <query_or_url>`** — Play video/audio offline. Automatically searches and downloads the media via `yt-dlp`, then boots the player.
+- **Background Player Controller** — Press `Ctrl+B` or `b` to background a song, returning to the REPL.
+- **Interactive Socket IPC Menu** — Press `Ctrl+B` in the REPL to pull up a prompt controlling pause, resume, stop, or foregrounding `[f]`.
+- **Media Dashboard** — Separate status listener using UNIX sockets to track player status.
+
+## Autonomous Job Search Engine
+- **`/job-search <resume_path>`** — Match resume with online jobs. Parses the CV, scrapes vacancy websites, identifies fits, and outputs matching roles.
+
+## Browser Automation Tool
+- **`browse_web(url, selector, action, value)`** — Interact with web pages headless using Playwright. Supports text scraping (`scrape`), clicking (`click`), and form inputs (`fill`).
+
+## Self-Update Feature
+- **`/update` (REPL) and `--update` (CLI)** — Automatically update open-agent. Executes `git pull` inside `~/.openagent` and updates dependencies with `pip install -e .`.
