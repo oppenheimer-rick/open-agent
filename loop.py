@@ -619,10 +619,11 @@ def jarvis_system_check() -> str:
     return "\n".join(lines)
 
 
-def check_and_summarize_obsidian_vault(force_scan=False) -> str:
+def check_and_summarize_obsidian_vault(force_scan=False, silent=False) -> str:
     """
     Scans the Obsidian Vault for the 3 most recently modified notes,
     and returns a formatted string of their filenames without reading their content.
+    If silent=True, suppresses the scanning print-out (used at startup).
     """
     config = config_load()
     vault_path_str = os.environ.get("OBSIDIAN_VAULT") or config.get("obsidian_vault_path")
@@ -635,7 +636,8 @@ def check_and_summarize_obsidian_vault(force_scan=False) -> str:
     if not vault_path.is_dir():
         return f"Obsidian Vault path is not a directory: {vault_path_str}"
 
-    print(f"\n{co(C.CYAN, '  🔎 Scanning Obsidian Vault:')} {vault_path}")
+    if not silent:
+        print(f"\n{co(C.CYAN, '  🔎 Scanning Obsidian Vault:')} {vault_path}")
     
     # Walk and find .md files
     md_files = []
@@ -3894,18 +3896,13 @@ Edit it with your context, and the agent will use this at the start of every cod
         except Exception:
             pass
 
-        # Obsidian Vault Scan & Summaries
+        # Obsidian Vault Scan (silent — results kept for LLM context, not printed)
         config = config_load()
-        if not os.environ.get("OBSIDIAN_VAULT") and not config.get("obsidian_vault_path"):
-            print(dim("\n  💡 Tip: Configure your Obsidian Vault path to get automated startup summaries!"))
-            print(dim("     Run: /obsidian-vault <path_to_vault>"))
-        else:
+        if os.environ.get("OBSIDIAN_VAULT") or config.get("obsidian_vault_path"):
             try:
-                OBSIDIAN_INSIGHTS = check_and_summarize_obsidian_vault()
-                if OBSIDIAN_INSIGHTS:
-                    print(OBSIDIAN_INSIGHTS)
-            except Exception as e:
-                print(co(C.RED, f"  Failed to scan Obsidian Vault: {e}"))
+                OBSIDIAN_INSIGHTS = check_and_summarize_obsidian_vault(silent=True)
+            except Exception:
+                pass
 
         print(f"\n{co(C.BOLD + C.PURPLE, '  Terminal Editor Mode')}")
         print(

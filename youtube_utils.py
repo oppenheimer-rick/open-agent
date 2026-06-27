@@ -4,12 +4,54 @@ from pathlib import Path
 import time
 import sys
 import os
-import tty
-import termios
-import select
 import socket
+import tempfile
+import shutil
+
+# Platform-specific imports for keyboard capture
+_IS_WINDOWS = sys.platform == "win32"
+if not _IS_WINDOWS:
+    import tty
+    import termios
+    import select
+
+# Cross-platform IPC socket path
+MPV_SOCK_PATH = str(Path(tempfile.gettempdir()) / "open_agent_mpv.sock")
+
 
 CURRENT_SONG = None  # Holds dict with 'title', 'filename', 'filepath', 'proc'
+
+
+def find_media_player(prefer_no_video: bool = False):
+    """Locate mpv or vlc on the current platform. Returns (binary, args_prefix) or (None, [])."""
+    candidates = []
+    if _IS_WINDOWS:
+        # Common Windows install paths
+        win_paths = [
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+        ]
+        candidates = [
+            ("mpv", ["mpv.exe"]),
+            ("vlc", [str(p / "VideoLAN" / "VLC" / "vlc.exe") for p in win_paths]),
+        ]
+    elif sys.platform == "darwin":
+        candidates = [
+            ("mpv", ["mpv", "/usr/local/bin/mpv", "/opt/homebrew/bin/mpv"]),
+            ("vlc", ["/Applications/VLC.app/Contents/MacOS/VLC", "vlc"]),
+        ]
+    else:  # Linux
+        candidates = [
+            ("mpv", ["mpv"]),
+            ("vlc", ["cvlc", "vlc"]),  # cvlc = VLC without GUI (for background audio)
+        ]
+
+    for player_name, paths in candidates:
+        for path in paths:
+            resolved = shutil.which(path) or (Path(path).exists() and path)
+            if resolved:
+                return player_name, str(resolved)
+    return None, None
 
 def youtube_search(query: str, max_results: int = 5) -> list:
     """Search YouTube and return a list of video information dicts."""
@@ -91,6 +133,11 @@ def download_media(query_or_url: str, video: bool = True) -> str | None:
                     expected_path = expected_path.with_suffix(".mp3")
                 expected_filename = str(expected_path)
         
+        # ── Skip download if file already exists ────────────────────────────
+        if expected_filename and Path(expected_filename).exists():
+            print(f"  [yt-dlp] Already downloaded: {Path(expected_filename).name}")
+            return expected_filename
+        
         # Run the actual download
         if video:
             cmd_download = [
@@ -142,6 +189,12 @@ def download_media(query_or_url: str, video: bool = True) -> str | None:
     return None
 
 def get_key_nonblocking() -> str | None:
+    """Non-blocking key read; cross-platform (Windows + Unix)."""
+    if _IS_WINDOWS:
+        import msvcrt
+        if msvcrt.kbhit():
+            return msvcrt.getwch()
+        return None
     if not sys.stdin.isatty():
         return None
     fd = sys.stdin.fileno()
@@ -159,13 +212,14 @@ def get_key_nonblocking() -> str | None:
     return None
 
 def send_mpv_ipc_command(command: list) -> dict | None:
-    socket_path = "/tmp/open_agent_mpv.sock"
-    if not os.path.exists(socket_path):
+    if _IS_WINDOWS:
+        return None  # mpv IPC uses UNIX sockets; not available on Windows
+    if not os.path.exists(MPV_SOCK_PATH):
         return None
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(0.2)
-        client.connect(socket_path)
+        client.connect(MPV_SOCK_PATH)
         payload = json.dumps({"command": command}) + "\n"
         client.sendall(payload.encode())
         response = client.recv(4096).decode()
@@ -252,8 +306,8 @@ def play_song(query_or_url: str) -> str:
     filename = Path(filepath).name
     title = Path(filepath).stem
     
-    # Clear preexisting IPC socket
-    socket_path = Path("/tmp/open_agent_mpv.sock")
+    # Cross-platform IPC socket path — clean up any stale socket
+    socket_path = Path(MPV_SOCK_PATH)
     if socket_path.exists():
         try:
             socket_path.unlink()
@@ -262,30 +316,51 @@ def play_song(query_or_url: str) -> str:
             
     print(f"\n🎵 Loading: {filename}")
     
+    # Locate the best available media player
+    player_name, player_bin = find_media_player(prefer_no_video=not is_video_request)
+    if not player_bin:
+        return "ERROR: No media player found. Please install mpv or VLC."
+    
     try:
         if is_video_request:
-            # GUI window docked on the right side of desktop screen
-            cmd = [
-                "mpv",
-                "--geometry=25%x100%-0+0",
-                "--autofit=25%x100%",
-                "--title=Open-Agent Media Player",
-                "--input-ipc-server=/tmp/open_agent_mpv.sock",
-                filepath
-            ]
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            
-            CURRENT_SONG = {
-                "title": title,
-                "filename": filename,
-                "filepath": filepath,
-                "proc": proc
-            }
-            
+            # --- VIDEO: GUI window docked on the right ---
+            if player_name == "mpv":
+                cmd = [
+                    player_bin,
+                    "--geometry=25%x100%-0+0",
+                    "--autofit=25%x100%",
+                    "--title=Open-Agent Media Player",
+                    f"--input-ipc-server={MPV_SOCK_PATH}",
+                    filepath
+                ]
+            else:  # VLC
+                cmd = [player_bin, "--width=400", "--video-on-top", filepath]
+        else:
+            # --- AUDIO: background, no GUI ---
+            if player_name == "mpv":
+                cmd = [
+                    player_bin,
+                    "--no-video",
+                    f"--input-ipc-server={MPV_SOCK_PATH}",
+                    filepath
+                ]
+            else:  # cvlc / vlc
+                cmd = [player_bin, "--intf", "dummy", "--play-and-exit", filepath]
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        
+        CURRENT_SONG = {
+            "title": title,
+            "filename": filename,
+            "filepath": filepath,
+            "proc": proc
+        }
+        
+        if is_video_request:
             print("Press [b] to Background, [p] to Pause/Resume, [q] or Ctrl+C to Quit.")
             while proc.poll() is None:
                 key = get_key_nonblocking()
@@ -296,36 +371,15 @@ def play_song(query_or_url: str) -> str:
                     elif key in ('p', ' '):  # 'p' or Space
                         res = toggle_background_play()
                         print(f"\n[{res}]")
-                    elif key == 'q':  # 'q'
+                    elif key == 'q':
                         print("\n[Stopping playback...]")
                         stop_background_play()
                         break
                 time.sleep(0.1)
         else:
-            # Audio-only background playback with --no-video
-            cmd = [
-                "mpv",
-                "--no-video",
-                "--input-ipc-server=/tmp/open_agent_mpv.sock",
-                filepath
-            ]
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            
-            CURRENT_SONG = {
-                "title": title,
-                "filename": filename,
-                "filepath": filepath,
-                "proc": proc
-            }
-            
-            # Give it a brief moment to start
             time.sleep(0.5)
             if proc.poll() is None:
-                print(f"✓ '{title}' started playing in the background.")
+                print(f"✓ '{title}' now playing in the background ({player_name}).")
                 return f"Playing '{title}' in the background."
             else:
                 return f"Finished playing '{title}'."
