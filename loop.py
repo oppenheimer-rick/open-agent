@@ -4015,8 +4015,12 @@ Edit it with your context, and the agent will use this at the start of every cod
                     ),
                     complete_while_typing=True,
                 ).strip()
-            except (KeyboardInterrupt, EOFError):
-                # Save session state before exit
+            except KeyboardInterrupt:
+                # First Ctrl+C: cancel current input, stay in the loop
+                print(co(C.YELLOW, "\n  [Ctrl+C] Cancelled. Press Ctrl+C again or type 'exit' to quit."))
+                continue
+            except EOFError:
+                # Ctrl+D: exit cleanly
                 _save_last_session(chat_history)
                 print("\n" + co(C.BG_RED + C.WHITE + C.BOLD, " EXITED ") + " Bye.")
                 break
