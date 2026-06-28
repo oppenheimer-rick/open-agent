@@ -88,7 +88,7 @@ def _searx_json_search(client: httpx.Client, query: str, max_results: int) -> tu
             "language": "en-US",
             "categories": "general",
         },
-        timeout=0.8,
+        timeout=1.5,
     )
     if r.status_code == 403:
         return [], "json-disabled"
@@ -114,7 +114,7 @@ def _searx_html_search(client: httpx.Client, query: str, max_results: int) -> tu
             "language": "en-US",
             "categories": "general",
         },
-        timeout=0.8,
+        timeout=1.5,
     )
     r.raise_for_status()
     parser = SearxHTMLParser()
@@ -163,7 +163,7 @@ def _mojeek_search(client: httpx.Client, query: str, max_results: int) -> list:
             "https://www.mojeek.com/search",
             params={"q": query},
             headers=headers,
-            timeout=0.8,
+            timeout=5.0,
         )
         r.raise_for_status()
 
@@ -201,7 +201,7 @@ def _ddg_lite_search(client: httpx.Client, query: str, max_results: int) -> list
             "https://lite.duckduckgo.com/lite/",
             data={"q": query},
             headers=headers,
-            timeout=0.8,
+            timeout=5.0,
         )
         r.raise_for_status()
         
@@ -254,9 +254,56 @@ def _ddg_lite_search(client: httpx.Client, query: str, max_results: int) -> list
         return []
 
 
+def _ddg_html_search(client: httpx.Client, query: str, max_results: int) -> list:
+    """Fallback search using DuckDuckGo HTML (no JavaScript, GET request)."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        from urllib.parse import unquote
+        r = client.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers=headers,
+            timeout=5.0,
+        )
+        r.raise_for_status()
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        
+        for result_div in soup.find_all("div", class_="result"):
+            title_a = result_div.find("a", class_="result__url")
+            snippet_a = result_div.find("a", class_="result__snippet")
+            if title_a:
+                title = title_a.get_text(strip=True)
+                url = title_a.get("href", "")
+                if not title or not url:
+                    continue
+                if "duckduckgo.com/y.js" in url or "duckduckgo-help-pages" in url or title.lower() == "more info":
+                    continue
+                if "/l/?uddg=" in url:
+                    m = re.search(r"uddg=([^&]+)", url)
+                    if m:
+                        url = unquote(m.group(1))
+                snippet = snippet_a.get_text(strip=True) if snippet_a else ""
+                results.append({
+                    "title": title,
+                    "url": url,
+                    "content": snippet,
+                    "query": query
+                })
+                if len(results) >= max_results:
+                    break
+        return results
+    except Exception:
+        return []
+
+
 def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
     """
-    Agentic SearXNG search with Mojeek and DuckDuckGo Lite fallbacks.
+    Agentic SearXNG search with DuckDuckGo Lite, DuckDuckGo HTML, and Mojeek fallbacks.
     """
     diagnostics = []
     all_results = []
@@ -269,6 +316,7 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
 
     try:
         with httpx.Client(headers=headers, follow_redirects=True) as client:
+            # 1. Local SearXNG (JSON -> HTML)
             for i, variant in enumerate(variants):
                 if len(all_results) > 0:
                     break
@@ -289,13 +337,14 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
                     diagnostics.append(f"searx:{variant}:{type(e).__name__}")
                     continue
 
+            # 2. DuckDuckGo Lite (POST)
             if not all_results:
-                diagnostics.append("searx-failed:trying-mojeek")
+                diagnostics.append("searx-failed:trying-ddg-lite")
                 for variant in variants[:2]:
-                    mojeek_results = _mojeek_search(client, variant, max_results)
-                    if mojeek_results:
-                        diagnostics.append(f"mojeek:{variant}:{len(mojeek_results)}")
-                        for res in mojeek_results:
+                    ddg_results = _ddg_lite_search(client, variant, max_results)
+                    if ddg_results:
+                        diagnostics.append(f"ddg-lite:{variant}:{len(ddg_results)}")
+                        for res in ddg_results:
                             url = res.get("url", "")
                             if url and url not in seen_urls:
                                 seen_urls.add(url)
@@ -304,13 +353,30 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
                     if len(all_results) >= max_results:
                         break
 
+            # 3. DuckDuckGo HTML (GET)
             if not all_results:
-                diagnostics.append("mojeek-failed:trying-ddg")
+                diagnostics.append("ddg-lite-failed:trying-ddg-html")
                 for variant in variants[:2]:
-                    ddg_results = _ddg_lite_search(client, variant, max_results)
-                    if ddg_results:
-                        diagnostics.append(f"ddg:{variant}:{len(ddg_results)}")
-                        for res in ddg_results:
+                    ddg_html_res = _ddg_html_search(client, variant, max_results)
+                    if ddg_html_res:
+                        diagnostics.append(f"ddg-html:{variant}:{len(ddg_html_res)}")
+                        for res in ddg_html_res:
+                            url = res.get("url", "")
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                res["score"] = _score_result(res, query)
+                                all_results.append(res)
+                    if len(all_results) >= max_results:
+                        break
+
+            # 4. Mojeek
+            if not all_results:
+                diagnostics.append("ddg-html-failed:trying-mojeek")
+                for variant in variants[:2]:
+                    mojeek_results = _mojeek_search(client, variant, max_results)
+                    if mojeek_results:
+                        diagnostics.append(f"mojeek:{variant}:{len(mojeek_results)}")
+                        for res in mojeek_results:
                             url = res.get("url", "")
                             if url and url not in seen_urls:
                                 seen_urls.add(url)
@@ -326,7 +392,7 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
 
     if not all_results:
         return (
-            "No results found after trying SearXNG, Mojeek, and DuckDuckGo Lite.\n"
+            "No results found after trying SearXNG, DuckDuckGo Lite, DuckDuckGo HTML, and Mojeek.\n"
             "Diagnostics: " + "; ".join(diagnostics[:8]) + "\n"
             "Possible issues: Search engines are rate-limiting or blocking automated access."
         )
@@ -466,11 +532,27 @@ def web_fetch(url: str, query: str = "") -> str:
         )
         return final_content
 
+    except httpx.ConnectError as e:
+        # Check if it's a DNS resolution error or connect error
+        domain = urlparse(url).netloc
+        return (
+            f"FATAL ERROR: The domain '{domain}' does not exist or cannot be resolved (DNS resolution failed).\n"
+            f"This is highly likely a typo in the URL (e.g., 'pcggamer.com' instead of 'pcgamer.com').\n"
+            f"Please check the spelling of the domain and DO NOT retry the exact same URL. Find an alternative."
+        )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             return f"FATAL ERROR 404: The page {url} does not exist. DO NOT RETRY THIS URL. Abandon this specific link and search for an alternative."
         return f"FATAL ERROR HTTP {e.response.status_code} fetching URL: {e}. DO NOT RETRY THIS URL."
     except Exception as e:
+        # Check for DNS error in generic exception message
+        if "getaddrinfo" in str(e) or "Name or service not known" in str(e):
+            domain = urlparse(url).netloc
+            return (
+                f"FATAL ERROR: The domain '{domain}' does not exist or cannot be resolved (DNS resolution failed).\n"
+                f"This is highly likely a typo in the URL (e.g., 'pcggamer.com' instead of 'pcgamer.com').\n"
+                f"Please check the spelling of the domain and DO NOT retry the exact same URL. Find an alternative."
+            )
         return f"FATAL ERROR fetching URL: {e}. DO NOT RETRY THIS URL."
 
 
