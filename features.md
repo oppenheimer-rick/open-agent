@@ -69,6 +69,7 @@
 - **Git Integration** — `git_status` for repo awareness.
 
 ## UI/UX Features
+- **KV Cache Pre-Warming** — Sends an invisible pre-warm request (`"Reply with 'yes' if you are here for me"`) containing system prompts/grounding behind a `Booting LLM...` spinner at session start. This pre-fills the local LLM server's KV cache, shifting the initial prompt prefill latency to the boot sequence so that subsequent user interactions generate responses instantly.
 - **Live streaming spinner** — Animated spinner during LLM reasoning.
 - **Token usage footer** — Per-step and per-session token stats.
 - **Colour-coded output** — CYAN for assistant, GRAY for thinking, GREEN for success, RED for errors.

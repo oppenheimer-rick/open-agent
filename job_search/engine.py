@@ -562,6 +562,150 @@ def generate_html_dashboard(scored_jobs: list[dict], profile: dict, prediction: 
     except Exception:
         return None
 
+def fill_lever_form(page, profile, resume_path, co_fn, c_colors):
+    print(co_fn(c_colors.CYAN, "  🤖 Auto-filling Lever application form..."))
+    
+    # Fill Name
+    try:
+        page.locator("input[name='name']").fill(profile.get("name", "Alex Stark"))
+    except Exception:
+        pass
+    
+    # Fill Email
+    try:
+        page.locator("input[name='email']").fill(profile.get("email", "alex.stark@example.com"))
+    except Exception:
+        pass
+        
+    # Fill Phone
+    try:
+        page.locator("input[name='phone']").fill(profile.get("phone", "+1 555-0199"))
+    except Exception:
+        pass
+        
+    # Fill LinkedIn
+    try:
+        page.locator("input[name='urls[LinkedIn]']").fill(profile.get("linkedin", "https://linkedin.com/in/alexstark"))
+    except Exception:
+        pass
+        
+    # Fill GitHub
+    try:
+        page.locator("input[name='urls[GitHub]']").fill(profile.get("github", "https://github.com/alexstark"))
+    except Exception:
+        pass
+
+    # Upload Resume
+    try:
+        if resume_path:
+            page.locator("input[type='file']").set_input_files(resume_path)
+            print(co_fn(c_colors.GREEN, "  ✓ Resume uploaded successfully."))
+    except Exception as e:
+        print(co_fn(c_colors.YELLOW, f"  ⚠️ Resume upload failed: {e}"))
+
+    print(co_fn(c_colors.GREEN, "  ✓ Lever form populated. Please review the details and submit manually."))
+
+
+def fill_greenhouse_form(page, profile, resume_path, co_fn, c_colors):
+    print(co_fn(c_colors.CYAN, "  🤖 Auto-filling Greenhouse application form..."))
+    
+    # Split name into first and last
+    full_name = profile.get("name", "Alex Stark")
+    parts = full_name.split()
+    first_name = parts[0] if parts else ""
+    last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+    
+    try:
+        page.locator("#first_name").fill(first_name)
+    except Exception:
+        pass
+    try:
+        page.locator("#last_name").fill(last_name)
+    except Exception:
+        pass
+        
+    try:
+        page.locator("#email").fill(profile.get("email", "alex.stark@example.com"))
+    except Exception:
+        pass
+        
+    try:
+        page.locator("#phone").fill(profile.get("phone", "+1 555-0199"))
+    except Exception:
+        pass
+        
+    # Find social link fields (they often vary, so search by label text)
+    try:
+        linkedin_label = page.locator("label:has-text('LinkedIn')")
+        if linkedin_label.count() > 0:
+            for_attr = linkedin_label.first.get_attribute("for")
+            if for_attr:
+                page.locator(f"#{for_attr}").fill(profile.get("linkedin", ""))
+            else:
+                linkedin_label.locator("xpath=..//input").fill(profile.get("linkedin", ""))
+    except Exception:
+        pass
+
+    try:
+        github_label = page.locator("label:has-text('GitHub')")
+        if github_label.count() > 0:
+            for_attr = github_label.first.get_attribute("for")
+            if for_attr:
+                page.locator(f"#{for_attr}").fill(profile.get("github", ""))
+            else:
+                github_label.locator("xpath=..//input").fill(profile.get("github", ""))
+    except Exception:
+        pass
+
+    # Upload Resume
+    try:
+        if resume_path:
+            page.locator("input[type='file'][id='resume_file']").set_input_files(resume_path)
+            print(co_fn(c_colors.GREEN, "  ✓ Resume uploaded successfully."))
+    except Exception as e:
+        print(co_fn(c_colors.YELLOW, f"  ⚠️ Resume upload failed: {e}"))
+
+    print(co_fn(c_colors.GREEN, "  ✓ Greenhouse form populated. Please review the details and submit manually."))
+
+
+def auto_fill_application(target_job, profile, resume_path, co_fn, c_colors):
+    print(co_fn(c_colors.CYAN, f"\n  🚀 Connecting to browser via Remote Debugging (port 9222)..."))
+    
+    with sync_playwright() as p:
+        try:
+            # Connect to existing Chrome instance running with remote debugging enabled
+            browser = p.chromium.connect_over_cdp("http://localhost:9222")
+            
+            # Find an active context or create one
+            if not browser.contexts:
+                print(co_fn(c_colors.RED, "  Error: No active browser context found. Please open a Chrome window."))
+                return
+                
+            context = browser.contexts[0]
+            page = context.new_page()
+            
+            print(co_fn(c_colors.CYAN, f"  Navigating to: {target_job['url']}"))
+            page.goto(target_job["url"])
+            page.wait_for_load_state("domcontentloaded")
+            
+            # Handle platform forms
+            url_lower = target_job["url"].lower()
+            if "lever.co" in url_lower:
+                fill_lever_form(page, profile, resume_path, co_fn, c_colors)
+            elif "greenhouse.io" in url_lower:
+                fill_greenhouse_form(page, profile, resume_path, co_fn, c_colors)
+            else:
+                print(co_fn(c_colors.YELLOW, "  ⚠️ Auto-fill is currently only supported on Lever and Greenhouse platforms. Please check the opened page."))
+                
+            # Keep browser connection open for a moment to let Playwright complete actions
+            page.wait_for_timeout(3000)
+            
+        except Exception as e:
+            print(co_fn(c_colors.RED, f"  ✖ Failed to connect to browser on port 9222: {e}"))
+            print(co_fn(c_colors.YELLOW, "  💡 Solution: Make sure Chrome is launched with remote debugging enabled before running this command:"))
+            print(co_fn(c_colors.YELLOW, "     google-chrome --remote-debugging-port=9222"))
+            print(co_fn(c_colors.YELLOW, "  Then run '/job-search' again and select a job number to auto-fill!"))
+
 def job_search_run(resume_path: str, llm_generate_fn, smart_search_fn, search_web_fn, co_fn, c_colors):
     def safe_llm_generate(system, user, max_tokens=512):
         try:
@@ -626,14 +770,24 @@ def job_search_run(resume_path: str, llm_generate_fn, smart_search_fn, search_we
     print(co_fn(c_colors.CYAN, "  🧠 Extracting profile and brainstorming adjacent search angles..."))
     system_prompt = (
         "You are an expert recruiter and job search architect. Analyze the resume and extract:\n"
-        "1. The candidate's target job title.\n"
-        "2. The candidate's experience level (Junior, Mid, Senior, Lead).\n"
-        "3. Core skills.\n"
-        "4. Brainstorm 4-6 adjacent job titles and specific keywords they should search for based on skills. "
+        "1. The candidate's full name.\n"
+        "2. The candidate's email address.\n"
+        "3. The candidate's phone number.\n"
+        "4. The candidate's LinkedIn URL.\n"
+        "5. The candidate's GitHub URL.\n"
+        "6. The candidate's target job title.\n"
+        "7. The candidate's experience level (Junior, Mid, Senior, Lead).\n"
+        "8. Core skills.\n"
+        "9. Brainstorm 4-6 adjacent job titles and specific keywords they should search for based on skills. "
         "For example, if the resume is a Full-Stack developer with agentic systems experience, brainstorm angles like "
         "'Python Developer', 'Full Stack Developer', 'FDE (Foundry/Forward Deployed Engineer)', 'LLM Agent Engineer', 'AI Integration Engineer'.\n\n"
         "Return a JSON object containing precisely these fields:\n"
         "{\n"
+        '  "name": "full name",\n'
+        '  "email": "email",\n'
+        '  "phone": "phone number",\n'
+        '  "linkedin": "linkedin url",\n'
+        '  "github": "github url",\n'
         '  "job_title": "extracted target job title",\n'
         '  "experience_level": "Junior|Mid|Senior|Lead",\n'
         '  "skills": ["skill1", "skill2", ...],\n'
@@ -649,6 +803,11 @@ def job_search_run(resume_path: str, llm_generate_fn, smart_search_fn, search_we
         profile = robust_json_parse(profile_json_str)
     except Exception:
         profile = {
+            "name": "Alex Stark",
+            "email": "alex.stark@example.com",
+            "phone": "+1 555-0199",
+            "linkedin": "https://linkedin.com/in/alexstark",
+            "github": "https://github.com/alexstark",
             "job_title": "Software Engineer",
             "experience_level": "Mid",
             "skills": ["Python", "JavaScript"],
@@ -1027,9 +1186,13 @@ def job_search_run(resume_path: str, llm_generate_fn, smart_search_fn, search_we
                 idx = int(choice) - 1
                 if 0 <= idx < len(combined_scored_jobs):
                     target_job = combined_scored_jobs[idx]
-                    print(co_fn(c_colors.GREEN, f"  🚀 Initializing Auto-Apply for: {target_job['title']} at {extract_company_name(target_job['url'], target_job['title'])}"))
-                    print(dim(f"  Opening browser tab for: {target_job['url']}..."))
-                    print(co_fn(c_colors.GREEN, "  ✓ Setup complete. Please review the browser tab."))
+                    auto_fill_application(
+                        target_job=target_job,
+                        profile=profile,
+                        resume_path=resume_path,
+                        co_fn=co_fn,
+                        c_colors=c_colors
+                    )
                 else:
                     print(co_fn(c_colors.RED, "  Invalid selection."))
         except Exception:

@@ -17,9 +17,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-MISSION_DIR = Path.home() / ".agentic-loop"
-MISSION_DIR.mkdir(parents=True, exist_ok=True)
-MISSION_FILE = MISSION_DIR / "mission.json"
+MISSION_FILE = Path(".agent_mission.json")
 
 
 def load() -> dict:

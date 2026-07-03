@@ -236,6 +236,10 @@ def iter_chat_events(
                         usage = chunk["usage"]
 
     except httpx.HTTPStatusError as e:
+        try:
+            e.response.read()
+        except Exception:
+            pass
         yield {
             "type": "error",
             "message": f"HTTP {e.response.status_code}: {e.response.text[:200]}",
@@ -394,6 +398,10 @@ def _stream_anthropic(client, url, headers, model, messages, tools, payload):
                         current_tool_input = ""
 
     except httpx.HTTPStatusError as e:
+        try:
+            e.response.read()
+        except Exception:
+            pass
         yield {"type": "error", "message": f"Anthropic HTTP {e.response.status_code}: {e.response.text[:200]}"}
         raise
     except KeyboardInterrupt:
@@ -482,14 +490,15 @@ def _stream_ollama_native(resp, first_token, full_content, tool_calls_acc, finis
 
 # ── Synchronous (non-streaming) generation ─────────────────────────────────────
 
-def generate(system_prompt: str, user_prompt: str, max_tokens: int = 512) -> str:
+def generate(system_prompt: str | None, user_prompt: str | None, max_tokens: int = 512, messages: list | None = None) -> str:
     """Simple synchronous LLM call for lightweight sub-tasks (memory, OOTB, etc.)."""
+    msgs = messages if messages is not None else [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
     payload = {
         "model": get_model(),
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": msgs,
         "temperature": 0.3,
         "max_tokens": max_tokens,
         "stream": False,

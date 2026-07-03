@@ -99,6 +99,9 @@ llama-server
 --n-gpu-layers auto
 ```
 
+> [!TIP]
+> **Zero-Latency Boot (KV Cache Pre-Warming)**: On starting a new session, open-agent automatically triggers a `Booting LLM...` spinner and sends an invisible pre-warm request to the local server. Combined with llama-server's `--cache-prompt` flag, this pre-fills the server's KV cache, moving the initial prompt processing overhead to the boot phase so your first real message gets a response almost instantly.
+
 ## ◈ Core Capabilities
 
 ### ◆ Built-in Tool Suite

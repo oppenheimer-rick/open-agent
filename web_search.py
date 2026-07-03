@@ -301,7 +301,7 @@ def _ddg_html_search(client: httpx.Client, query: str, max_results: int) -> list
         return []
 
 
-def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
+def search_web(query: str, max_results: int = 4, current: bool = True) -> str:
     """
     Agentic SearXNG search with DuckDuckGo Lite, DuckDuckGo HTML, and Mojeek fallbacks.
     """
@@ -314,78 +314,63 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
         "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
     }
 
-    try:
-        with httpx.Client(headers=headers, follow_redirects=True) as client:
-            # 1. Local SearXNG (JSON -> HTML)
-            for i, variant in enumerate(variants):
-                if len(all_results) > 0:
-                    break
-                try:
-                    results, mode = _searx_json_search(client, variant, max_results)
+    # Parallel search worker
+    def run_engine(engine, variant):
+        try:
+            with httpx.Client(headers=headers, follow_redirects=True) as client:
+                if engine == "searx":
+                    res, mode = _searx_json_search(client, variant, max_results)
                     if mode == "json-disabled":
-                        results, mode = _searx_html_search(client, variant, max_results)
+                        res, mode = _searx_html_search(client, variant, max_results)
+                    return f"searx-{mode}", res
+                elif engine == "ddg_lite":
+                    return "ddg-lite", _ddg_lite_search(client, variant, max_results)
+                elif engine == "ddg_html":
+                    return "ddg-html", _ddg_html_search(client, variant, max_results)
+                elif engine == "mojeek":
+                    return "mojeek", _mojeek_search(client, variant, max_results)
+        except Exception as e:
+            return f"{engine}-err:{type(e).__name__}", []
+        return engine, []
 
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+
+    jobs = []
+    # Primary query on all engines
+    for engine in ["searx", "ddg_lite", "ddg_html", "mojeek"]:
+        jobs.append((engine, variants[0]))
+    # Secondary query variant on faster fallbacks
+    if len(variants) > 1:
+        for engine in ["searx", "ddg_lite"]:
+            jobs.append((engine, variants[1]))
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+            futures = {executor.submit(run_engine, engine, var): (engine, var) for engine, var in jobs}
+            
+            # Wait for any engine to complete with a max overall timeout of 4.5s
+            for future in as_completed(futures, timeout=4.5):
+                engine, var = futures[future]
+                try:
+                    label, results = future.result()
                     if results:
-                        diagnostics.append(f"{mode}:{variant}:{len(results)}")
+                        diagnostics.append(f"{label}:{var}:{len(results)}")
                         for res in results:
                             url = res.get("url", "")
                             if url and url not in seen_urls:
+                                if "…" in url or "..." in url:
+                                    continue
                                 seen_urls.add(url)
                                 res["score"] = _score_result(res, query)
                                 all_results.append(res)
                 except Exception as e:
-                    diagnostics.append(f"searx:{variant}:{type(e).__name__}")
-                    continue
-
-            # 2. DuckDuckGo Lite (POST)
-            if not all_results:
-                diagnostics.append("searx-failed:trying-ddg-lite")
-                for variant in variants[:2]:
-                    ddg_results = _ddg_lite_search(client, variant, max_results)
-                    if ddg_results:
-                        diagnostics.append(f"ddg-lite:{variant}:{len(ddg_results)}")
-                        for res in ddg_results:
-                            url = res.get("url", "")
-                            if url and url not in seen_urls:
-                                seen_urls.add(url)
-                                res["score"] = _score_result(res, query)
-                                all_results.append(res)
-                    if len(all_results) >= max_results:
-                        break
-
-            # 3. DuckDuckGo HTML (GET)
-            if not all_results:
-                diagnostics.append("ddg-lite-failed:trying-ddg-html")
-                for variant in variants[:2]:
-                    ddg_html_res = _ddg_html_search(client, variant, max_results)
-                    if ddg_html_res:
-                        diagnostics.append(f"ddg-html:{variant}:{len(ddg_html_res)}")
-                        for res in ddg_html_res:
-                            url = res.get("url", "")
-                            if url and url not in seen_urls:
-                                seen_urls.add(url)
-                                res["score"] = _score_result(res, query)
-                                all_results.append(res)
-                    if len(all_results) >= max_results:
-                        break
-
-            # 4. Mojeek
-            if not all_results:
-                diagnostics.append("ddg-html-failed:trying-mojeek")
-                for variant in variants[:2]:
-                    mojeek_results = _mojeek_search(client, variant, max_results)
-                    if mojeek_results:
-                        diagnostics.append(f"mojeek:{variant}:{len(mojeek_results)}")
-                        for res in mojeek_results:
-                            url = res.get("url", "")
-                            if url and url not in seen_urls:
-                                seen_urls.add(url)
-                                res["score"] = _score_result(res, query)
-                                all_results.append(res)
-                    if len(all_results) >= max_results:
-                        break
+                    diagnostics.append(f"{engine}-failed:{type(e).__name__}")
+    except TimeoutError:
+        diagnostics.append("parallel-search-timeout")
     except KeyboardInterrupt:
         raise AgentInterrupted()
+    except Exception as e:
+        diagnostics.append(f"pool-error:{type(e).__name__}")
 
     all_results.sort(key=lambda r: r.get("score", 0), reverse=True)
     all_results = all_results[:max_results]
@@ -407,7 +392,7 @@ def search_web(query: str, max_results: int = 6, current: bool = True) -> str:
         lines += [
             f"{i}. {res.get('title', '(no title)')}",
             f"   URL: {res.get('url', '')}",
-            f"   SNIPPET: {trunc(res.get('content', ''), 300)}",
+            f"   SNIPPET: {trunc(res.get('content', ''), 180)}",
             "",
         ]
     return "\n".join(lines)
@@ -488,12 +473,12 @@ def web_fetch(url: str, query: str = "") -> str:
             )
             is_raw = True
 
-        resp = httpx.get(url, timeout=20, follow_redirects=True)
+        resp = httpx.get(url, timeout=7.0, follow_redirects=True)
         resp.raise_for_status()
         text = resp.text
 
         if is_raw:
-            return text[:12000]
+            return text[:6000]
 
         # Use BeautifulSoup to strip out boilerplate HTML
         soup = BeautifulSoup(text, "html.parser")
@@ -518,8 +503,8 @@ def web_fetch(url: str, query: str = "") -> str:
             )
             return final_content
 
-        # Apply RAG
-        rag_content = simple_rag(clean_text, query, chunk_size=1500, top_k=3)
+        # Apply RAG (more compact: 1000 char chunks, top_k=2)
+        rag_content = simple_rag(clean_text, query, chunk_size=1000, top_k=2)
 
         header = (
             f"--- EXTRACTED RAG KNOWLEDGE GRAPH (Query: '{query}') ---\n"
