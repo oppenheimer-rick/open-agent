@@ -427,6 +427,7 @@ Edit it with your context, and the agent will use this at the start of every cod
             chat_history.extend(saved)
             print(dim(f"\n  💾 Restored last session ({len(saved)} messages). /resume to continue."))
 
+        last_ctrl_c_time = 0
         while True:
             try:
                 user_input = prompt_session.prompt(
@@ -440,6 +441,12 @@ Edit it with your context, and the agent will use this at the start of every cod
                     complete_while_typing=True,
                 ).strip()
             except KeyboardInterrupt:
+                now = time.monotonic()
+                if now - last_ctrl_c_time < 1.5:
+                    _save_last_session(chat_history)
+                    print("\n" + co(C.BG_RED + C.WHITE + C.BOLD, " EXITED ") + " Bye.")
+                    break
+                last_ctrl_c_time = now
                 print(co(C.YELLOW, "\n  [Ctrl+C] Cancelled. Press Ctrl+C again or type 'exit' to quit."))
                 continue
             except EOFError:
