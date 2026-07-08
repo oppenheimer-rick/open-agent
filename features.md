@@ -16,9 +16,28 @@
 - **Auto-cleanup** — Oldest sessions beyond 50 are pruned automatically.
 
 ## Smart Web Search
-- **Multi-query generation** — `smart_search(topic)` generates 3 targeted search queries exploring different angles.
-- **Aggregated results** — Runs all queries, deduplicates by URL, ranks by score, returns top 12 results.
-- **Graceful fallback** — Falls back to a single `search_web` call if the LLM fails to produce queries.
+
+The agent uses a **5-tier sequential fallback chain** (never parallel) for reliable, zero-error web search within a 61k token context window.
+
+| Tier | Engine | Latency | Notes |
+|:---|:---|:---:|:---|
+| 1 | **ddgs** (DuckDuckGo API, 9k+ ⭐) | ~2.5s | Primary — persistent instance, VQD token cached across calls |
+| 2 | **DuckDuckGo Lite** | ~1s | Fresh httpx client per call to avoid rate-limiting cookies |
+| 3 | **Wikipedia API** | ~0.5s | Never-fail fallback — free, no API key, works for most queries |
+| 4 | **DDG HTML scrape** | ~2s | Deep fallback with VQD token extraction |
+| 5 | **SearXNG** (localhost) | ~2s | Single call, 2s timeout, no retries — simple message |
+
+### Key Behaviors
+- **Never parallel**: Each engine called in sequence, no ThreadPoolExecutor. Saves context window by avoiding bloat from multiple simultaneous results.
+- **Zero error leakage**: Every HTTP error (403/401/404/connection) caught and converted to `STOP: ...` signal. No raw errors reach the agent.
+- **Input safety**: Query sanitized (200 char limit, control chars stripped), returned URLs validated (http/https only), HTML stripped from output.
+- **LRU cache**: Same query within 5 min returns instantly. Failure/STOP messages are **never** cached.
+- **Agent loop integration**: `STOP: ...` in a tool result triggers immediate system message injection + step loop break — no retry spirals.
+
+### Context Budget
+- Running in a ~61k token context window. Each search call consumes ~300-500 tokens (compact format).
+- System prompt enforces: ONE search per topic, no retry on STOP, no simultaneous search_web + smart_search.
+- Output capped at 3 deduplicated, relevance-scored results per query.
 
 ## Precision File Editing
 - **`insert_lines(path, line, content)`** — Insert content at a specific line number.

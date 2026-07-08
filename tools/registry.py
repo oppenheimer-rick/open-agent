@@ -574,8 +574,9 @@ TOOLS = [
         "function": {
             "name": "search_web",
             "description": (
-                "Search the web via SearXNG. Use for: docs, error messages, "
-                "library APIs, current events, anything you're unsure about."
+                "Search the web via SearXNG or DuckDuckGo fallback. "
+                "Returns compact results (default 3). This model has a 61k context limit — "
+                "keep max_results small (1-3) to avoid filling the window."
             ),
             "parameters": {
                 "type": "object",
@@ -583,7 +584,7 @@ TOOLS = [
                     "query": {"type": "string"},
                     "max_results": {
                         "type": "integer",
-                        "description": "Results to return (default 8)",
+                        "description": "Results to return (default 3, keep under 5)",
                     },
                     "current": {
                         "type": "boolean",
@@ -892,7 +893,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "smart_search",
-            "description": "Generate multiple targeted search queries, run them all in parallel, and aggregate deduplicated results. Use for broad research topics where a single query may miss important angles.",
+            "description": "Generate targeted search queries, run them, and aggregate results. Use for broader research. Default: 1 query to conserve the 61k context window.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -902,7 +903,7 @@ TOOLS = [
                     },
                     "count": {
                         "type": "integer",
-                        "description": "Number of search queries to generate (default 3)"
+                        "description": "Number of search queries to generate (default 1, max 2 for 61k context)"
                     }
                 },
                 "required": ["topic"]
@@ -1234,12 +1235,10 @@ def generate_search_queries(topic: str, count: int = 3) -> list:
     return queries[:count] if queries else [topic]
 
 
-def smart_search(topic: str, count: int = 3) -> str:
+def smart_search(topic: str, count: int = 1) -> str:
     """
-    TOOL: Generate multiple targeted search queries, run them all,
-    and aggregate deduplicated results.
-    Returns richer context than a single-shot search.
-    """
+    TOOL: Generate targeted search query, run it,
+    and return results."""
     queries = generate_search_queries(topic, count)
     if not queries:
         queries = [topic]
@@ -1249,7 +1248,7 @@ def smart_search(topic: str, count: int = 3) -> str:
 
     for q in queries:
         try:
-            raw = search_web(q, max_results=4, current=True)
+            raw = search_web(q, max_results=2, current=True)
             # Parse results from search_web output format
             lines = raw.splitlines()
             i = 0
@@ -1267,8 +1266,8 @@ def smart_search(topic: str, count: int = 3) -> str:
                         else ""
                     )
                     snippet = (
-                        snippet_line.replace("   SNIPPET: ", "").strip()
-                        if "SNIPPET:" in snippet_line
+                        snippet_line[3:].strip()  # after "   " prefix
+                        if snippet_line
                         else ""
                     )
                     if url and url not in seen_urls:
@@ -1282,15 +1281,15 @@ def smart_search(topic: str, count: int = 3) -> str:
 
     if not all_results:
         # Fallback to a single search
-        raw = search_web(topic, max_results=4, current=True)
+        raw = search_web(topic, max_results=2, current=True)
         return raw
 
     output = [f"SMART SEARCH: {topic}"]
-    for r in all_results[:4]:
+    for r in all_results[:3]:
         output.append(f"\n{r['title']}")
         output.append(f"  URL: {r['url']}")
         if r["snippet"]:
-            output.append(f"  {r['snippet'][:250]}")
+            output.append(f"  {r['snippet'][:120]}")
 
     return "\n".join(output)
 
@@ -1510,7 +1509,7 @@ TOOL_MAP = {
     "patch_file": lambda a: builtin.patch_file(a["path"], a["search"], a["replace"]),
     "grep_codebase": lambda a: builtin.grep_codebase(a["pattern"], a.get("path", "."), a.get("file_ext", ".py")),
     "graph_search": lambda a: builtin.graph_search(a["query"], a.get("path", "."), a.get("file_ext", ".py")),
-    "search_web": lambda a: builtin.search_web(a["query"], int(a.get("max_results", 8))),
+    "search_web": lambda a: builtin.search_web(a["query"], int(a.get("max_results", 3))),
     "web_fetch": lambda a: builtin.web_fetch(a["url"]),
     "search_second_brain": lambda a: builtin.search_second_brain(a["query"]),
     "scout_website": lambda a: builtin.scout_website(a["url"]),
@@ -1528,7 +1527,7 @@ TOOL_MAP = {
     "sentinel_map_codebase": lambda _: __import__("tools.sentinel").sentinel_map_codebase(),
     "skill_factory": lambda a: builtin.skill_factory(a["task_name"], a["pattern_description"]),
     "consolidate_goals": lambda _: builtin.consolidate_goals(),
-    "smart_search": lambda a: __import__("core.agent", fromlist=["smart_search"]).smart_search(a["topic"], int(a.get("count", 3))),
+    "smart_search": lambda a: __import__("core.agent", fromlist=["smart_search"]).smart_search(a["topic"], int(a.get("count", 1))),
     "tail_file": lambda a: builtin.tail_file(a["path"], int(a.get("n", 20))),
     "insert_lines": lambda a: builtin.insert_lines(a["path"], int(a["line_number"]), a["content"]),
     "delete_lines": lambda a: builtin.delete_lines(a["path"], int(a["start_line"]), int(a["end_line"])),

@@ -37,7 +37,23 @@ import signal
 import subprocess
 import time
 import uuid
+import select
+import socket
 from pathlib import Path
+
+def is_online(timeout: float = 0.5) -> bool:
+    """Check if the machine has active internet access."""
+    if os.environ.get("OPENAGENT_OFFLINE") == "1":
+        return False
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(("8.8.8.8", 53))
+        s.close()
+        return True
+    except Exception:
+        return False
+
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -143,6 +159,16 @@ class MCPServer:
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # If the process has exited, we cannot read any further
+            if self._process.poll() is not None:
+                break
+
+            time_left = max(0.01, deadline - time.monotonic())
+            r, _, _ = select.select([self._process.stdout], [], [], time_left)
+            if not r:
+                # Timeout occurred
+                break
+
             line = self._process.stdout.readline()
             if not line:
                 break
@@ -324,12 +350,20 @@ class MCPManager:
 
         openai_tools = []
         tool_map = {}
+        online_status = is_online()
+        if not online_status:
+            print(f"\n  🔌 Running in OFFLINE mode — skipping network-dependent MCP servers.")
 
         for cfg in configs:
             name = cfg.get("name", "unknown")
             command = cfg.get("command", "")
             args = cfg.get("args", [])
             env = cfg.get("env", {})
+
+            # When offline, skip servers that require internet (e.g. npx commands)
+            if not online_status and command == "npx":
+                print(f"  🔌 MCP '{name}': disabled (offline mode)")
+                continue
 
             server = MCPServer(name=name, command=command, args=args, env=env)
             self.servers.append(server)

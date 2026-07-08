@@ -141,6 +141,93 @@ textarea { width: 100%; border: none; outline: none; background: transparent; pa
 .suggestion-item .cmd-desc {
   color: var(--text-secondary);
 }
+
+/* Retro hacker console styles */
+body::before {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(57, 255, 20, 0.06), rgba(0, 255, 0, 0.02), rgba(255, 0, 180, 0.05));
+  z-index: 99999;
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
+  opacity: 0.12;
+}
+
+[data-theme="dark"] body {
+  text-shadow: 0 0 1px rgba(57, 255, 20, 0.3);
+}
+
+.empty-state h1 {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  color: var(--accent);
+  text-shadow: 0 0 10px var(--accent), 0 0 20px rgba(57, 255, 20, 0.2);
+  margin-top: 12px;
+}
+
+.empty-state-subtitle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  margin-top: -12px;
+  margin-bottom: 24px;
+}
+
+/* Glassmorphism overrides */
+.composer-box {
+  background: rgba(30, 30, 30, 0.5) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(57, 255, 20, 0.2) !important;
+}
+
+.composer-box:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 15px var(--accent-soft) !important;
+}
+
+.history-item.active {
+  background: rgba(57, 255, 20, 0.08) !important;
+  border-left: 2px solid var(--accent) !important;
+  box-shadow: inset 5px 0 10px rgba(57, 255, 20, 0.05);
+}
+
+/* Micro-animations */
+button, .history-item, .model-selector {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+button:active {
+  transform: scale(0.96);
+}
+
+.history-item:hover {
+  transform: translateX(3px);
+  background: rgba(57, 255, 20, 0.04);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar-thumb {
+  background: rgba(57, 255, 20, 0.2);
+  border: 1px solid rgba(57, 255, 20, 0.1);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* Pikachu wiggle/float animation */
+@keyframes pika-wiggle {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(2deg); }
+}
+.pika-bounce {
+  animation: pika-wiggle 3s ease-in-out infinite;
+  filter: drop-shadow(0 4px 12px rgba(57, 255, 20, 0.3));
+}
 </style>
 </head>
 <body>
@@ -170,7 +257,42 @@ textarea { width: 100%; border: none; outline: none; background: transparent; pa
     <div id="message-thread">
       <div class="msg-container" id="message-list">
         <div class="empty-state" id="empty-state">
-          <h1>How can I help you today?</h1>
+          <svg class="pika-bounce w-32 h-32 mb-4" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- Ears -->
+            <path d="M25 35 L12 15 L23 20 Z" fill="var(--accent)" stroke="var(--bg-primary)" stroke-width="1.5"/>
+            <path d="M12 15 L16 17 L14 15 Z" fill="var(--bg-sidebar)"/>
+            <path d="M75 35 L88 15 L77 20 Z" fill="var(--accent)" stroke="var(--bg-primary)" stroke-width="1.5"/>
+            <path d="M88 15 L84 17 L86 15 Z" fill="var(--bg-sidebar)"/>
+            
+            <!-- Body / Head -->
+            <rect x="25" y="30" width="50" height="45" rx="18" fill="var(--accent)" stroke="var(--bg-primary)" stroke-width="1.5"/>
+            
+            <!-- Eyes -->
+            <circle cx="40" cy="46" r="3.5" fill="var(--bg-sidebar)"/>
+            <circle cx="40" cy="45" r="1.2" fill="#ffffff"/>
+            <circle cx="60" cy="46" r="3.5" fill="var(--bg-sidebar)"/>
+            <circle cx="60" cy="45" r="1.2" fill="#ffffff"/>
+            
+            <!-- Cheeks -->
+            <circle cx="33" cy="54" r="4.5" fill="#FF3366"/>
+            <circle cx="67" cy="54" r="4.5" fill="#FF3366"/>
+            
+            <!-- Mouth -->
+            <path d="M46 52 Q50 55 54 52" stroke="var(--bg-sidebar)" stroke-width="1.5" fill="none"/>
+            
+            <!-- Cheek lines -->
+            <path d="M45 61 L55 61" stroke="var(--bg-sidebar)" stroke-width="1.5"/>
+            <path d="M48 65 L52 65" stroke="var(--bg-sidebar)" stroke-width="1.5"/>
+            
+            <!-- Tail -->
+            <path d="M70 60 L85 48 L80 68 L72 63" fill="var(--accent)" stroke="var(--bg-primary)" stroke-width="1.5"/>
+            
+            <!-- Feet -->
+            <rect x="30" y="73" width="12" height="5" rx="2.5" fill="var(--accent)" stroke="var(--bg-primary)" stroke-width="1.5"/>
+            <rect x="58" y="73" width="12" height="5" rx="2.5" fill="var(--accent)" stroke="var(--bg-primary)" stroke-width="1.5"/>
+          </svg>
+          <h1>OPEN-AGENT // CORE TERMINAL</h1>
+          <div class="empty-state-subtitle">PIKA-HACKER PROTOCOL ACTIVE</div>
         </div>
       </div>
     </div>

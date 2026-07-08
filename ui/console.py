@@ -220,17 +220,23 @@ def ui_token_usage(usage: dict, step: int):
     o = usage.get("completion_tokens", 0)
     print(dim(f"  ⚡ {i} in / {o} out  (step {step})"))
 
-def ui_banner():
-    width = terminal_width()
-    logo = LOGO_WIDE if width >= 76 else LOGO_NARROW
-    print("\n")
-    for line in logo.strip("\n").splitlines():
-        print(line.center(width))
-    print()
-
 def visual_len(text: str) -> int:
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     return len(ansi_escape.sub('', text))
+
+def center_ansi(text: str, width: int) -> str:
+    vlen = visual_len(text)
+    pad = max(0, width - vlen)
+    left_pad = pad // 2
+    right_pad = pad - left_pad
+    return " " * left_pad + text + " " * right_pad
+
+def ui_banner():
+    width = terminal_width()
+    print("\n")
+    print(center_ansi(co(C.BOLD + C.WHITE, "=== open-agent ==="), width))
+    print(center_ansi(co(C.CYAN, "local-first · privacy-first · intelligence-driven"), width))
+    print("\n")
 
 def pad_line(text: str, width: int = 80, bg: str = "") -> str:
     vlen = visual_len(text)

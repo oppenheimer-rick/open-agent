@@ -35,10 +35,18 @@ Examples:
     p.add_argument(
         "--update", action="store_true", help="Update open-agent to the latest version"
     )
+    p.add_argument(
+        "--offline", action="store_true", help="Run in offline mode, bypassing all remote checks and network MCP servers"
+    )
     return p.parse_args()
 
 def main():
     args = _parse_args()
+    
+    import os
+    import mcp_client
+    if getattr(args, "offline", False) or not mcp_client.is_online():
+        os.environ["OPENAGENT_OFFLINE"] = "1"
     
     if getattr(args, "update", False):
         from ui.repl import update_openagent

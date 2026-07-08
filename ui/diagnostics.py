@@ -149,29 +149,32 @@ def jarvis_system_check() -> str:
     hn_stories = []
     wiki_article = None
     
-    def _fetch_hn():
-        nonlocal hn_stories
-        try:
-            hn_stories.extend(fetch_hn_top_stories())
-        except Exception:
-            pass
-            
-    def _fetch_wiki():
-        nonlocal wiki_article
-        try:
-            wiki_article = fetch_random_wikipedia_article()
-        except Exception:
-            pass
-            
-    t_hn = threading.Thread(target=_fetch_hn)
-    t_wiki = threading.Thread(target=_fetch_wiki)
+    is_offline = os.environ.get("OPENAGENT_OFFLINE") == "1"
     
-    t_hn.start()
-    t_wiki.start()
-    
-    # Wait at most 250ms to keep boot zero-latency
-    t_hn.join(timeout=0.25)
-    t_wiki.join(timeout=0.25)
+    if not is_offline:
+        def _fetch_hn():
+            nonlocal hn_stories
+            try:
+                hn_stories.extend(fetch_hn_top_stories())
+            except Exception:
+                pass
+                
+        def _fetch_wiki():
+            nonlocal wiki_article
+            try:
+                wiki_article = fetch_random_wikipedia_article()
+            except Exception:
+                pass
+                
+        t_hn = threading.Thread(target=_fetch_hn)
+        t_wiki = threading.Thread(target=_fetch_wiki)
+        
+        t_hn.start()
+        t_wiki.start()
+        
+        # Wait at most 250ms to keep boot zero-latency
+        t_hn.join(timeout=0.25)
+        t_wiki.join(timeout=0.25)
     
     # Format JARVIS boot screen
     lines = []
@@ -182,6 +185,10 @@ def jarvis_system_check() -> str:
     lines.append(f"  • {co(C.BOLD, 'Load & Memory:')}    {load_str}  ·  {mem_str}")
     lines.append(f"  • {co(C.BOLD, 'Workspace:')}        {git_status}")
     lines.append(f"  • {co(C.BOLD, 'Neural Link:')}      Local LLM Backend: {co(C.GREEN if llm_status == 'ONLINE' else C.RED, llm_status)}")
+    if is_offline:
+        lines.append(f"  • {co(C.BOLD, 'Network Grid:')}     {co(C.RED, 'OFFLINE')} (isolated mode)")
+    else:
+        lines.append(f"  • {co(C.BOLD, 'Network Grid:')}     {co(C.GREEN, 'ONLINE')}")
     lines.append(f"  • {co(C.BOLD, 'Security Grid:')}    Nominal. Encryption active.")
     
     if hn_stories:

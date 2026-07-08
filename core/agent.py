@@ -191,13 +191,13 @@ def manage_context(history: list, limit: int = 80):
         + footer
     )
 
-def smart_search(topic: str, count: int = 3) -> str:
+def smart_search(topic: str, count: int = 1) -> str:
     """Dynamically brainstorm queries and perform multi-angle web search."""
     from web_search import search_web
-    print(co(C.CYAN, f"  🧠 SmartSearch brainstorming {count} angles for: '{topic}'..."))
+    print(co(C.CYAN, f"  🧠 SmartSearch brainstorming {count} angle(s) for: '{topic}'..."))
     prompt = (
-        "You are an expert search query architect. Given a search request, brainstorm 3 highly specific, "
-        "diverse keyword query variants to extract high-density facts. Keep queries under 6 words.\n\n"
+        "You are an expert search query architect. Given a search request, brainstorm "
+        "highly specific keyword query variants to extract high-density facts. Keep queries under 6 words.\n\n"
         "Return a JSON list of strings, for example: [\"query variant 1\", \"query variant 2\", ...]"
     )
     res = llm_generate(prompt, f"Topic: {topic}", max_tokens=128)
@@ -215,8 +215,11 @@ def smart_search(topic: str, count: int = 3) -> str:
     combined_results = []
     for q in queries:
         print(dim(f"    🔍 Searching angle: {q}"))
-        search_res = search_web(q, max_results=3)
-        combined_results.append(f"=== Results for: {q} ===\n{search_res}")
+        search_res = search_web(q, max_results=2)
+        # Propagate STOP signal immediately — no point searching more queries
+        if search_res.startswith("STOP:"):
+            return search_res
+        combined_results.append(f"=== {q} ===\n{search_res}")
         time.sleep(0.1)
 
     return "\n\n".join(combined_results)
@@ -318,6 +321,7 @@ def run_agent(
     _tool_call_history = []
     _completed_writes = set()
     _write_completion_signaled = set()
+    stop_search = False
 
     if not chat_history:
         mission.migrate_from_todo_file()
@@ -329,17 +333,6 @@ def run_agent(
                     "content": f"ACTIVE MISSION:\n{mission_state}",
                 }
             )
-            print(f"\n{co(C.CYAN, '  ╭── Active Mission')}")
-            for line in mission_state.splitlines():
-                if line.startswith("MISSION STATUS:"):
-                    continue
-                if line.startswith(("  ▶", "  ○", "MISSION:", "CURRENT")):
-                    print(f"  │ {co(C.WHITE, line.lstrip())}")
-                elif line.startswith("  ✓"):
-                    print(f"  │ {dim(line.lstrip())}")
-                else:
-                    print(f"  │ {dim(line.lstrip())}")
-            print(f"  {co(C.CYAN, '╰' + '─' * 50)}\n")
 
         if Path(TODO_FILE).exists():
             try:
@@ -537,6 +530,15 @@ def run_agent(
                 }
             )
 
+            # Detect "STOP:" signal from search/fetch tools — inject hard stop
+            if str(result).startswith("STOP:") and fn_name in ("search_web", "smart_search", "web_fetch", "scout_website"):
+                messages.append({
+                    "role": "system",
+                    "content": "SYSTEM: search_web returned a STOP signal — search engines are unavailable. "
+                    "Do NOT call any search or fetch tool again this session. Answer from your existing knowledge."
+                })
+                stop_search = True
+
             path_arg = args.get("path", "") if isinstance(args, dict) else ""
             _tool_call_history.append((fn_name, path_arg))
             if fn_name == "write_file" and not error and path_arg:
@@ -572,6 +574,8 @@ def run_agent(
                 final_message = f"Completed writing {path}"
                 break
         if looped:
+            break
+        if stop_search:
             break
     else:
         ui_error(f"Reached max steps ({max_steps}). Stopping.")

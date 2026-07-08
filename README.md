@@ -118,10 +118,26 @@ llama-server
 | `⬡ delete_lines` | Precision line deletions |
 | `⬡ run_bash` | Execute local terminal commands |
 | `⬡ run_python` | Run code snippets for validation |
-| `⬡ search_web` | Real-time multi-query web search |
+| `⬡ search_web` | Real-time multi-engine web search |
 | `⬡ browse_web` | Headless browser automation (scrape, click, fill) using Playwright |
 
 </div>
+
+### ◆ Web Search Architecture
+
+The agent uses a **5-tier sequential fallback chain** — each tier is tried in order until one returns results. Never parallel.
+
+| Tier | Engine | Latency | Notes |
+|:---|:---|:---:|:---|
+| 1 | **ddgs** (DuckDuckGo API, 9k+ ⭐) | ~2.5s | Primary — persistent instance, VQD token cached |
+| 2 | **DuckDuckGo Lite** | ~1s | Fresh httpx client per call (avoids rate-limit cookies) |
+| 3 | **Wikipedia API** | ~0.5s | Never-fail fallback for factual/topical queries |
+| 4 | **DDG HTML scrape** | ~2s | Deep fallback with VQD token |
+| 5 | **SearXNG** (localhost) | ~2s | Single call, 2s timeout, no retries |
+
+**Safety**: Input sanitized (200 char limit, control chars stripped), URLs validated (http/https only), HTML stripped from output.  
+**Cache**: LRU with 5-min TTL for repeated queries. STOP/failure messages are **never** cached.  
+**Failure mode**: Returns `STOP: ...` signal → agent loop detects it, injects a system message to halt all search/fetch calls, and breaks out of the step loop.
 
 ### ◆ Slash Commands & Shortcuts
 

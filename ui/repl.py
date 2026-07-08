@@ -240,9 +240,14 @@ def get_toolbar(mode: str):
     """Render status bar."""
     mem_name = Path(MEMORY_FILE).name
     provider_info = providers.status_line()
+    is_offline = os.environ.get("OPENAGENT_OFFLINE") == "1"
+    net_status = "OFFLINE" if is_offline else "ONLINE"
+    net_color = "red" if is_offline else "green"
     return HTML(
         f'<style bg="ansicyan" fg="ansiblack"><b> OPEN-AGENT </b></style>'
         f'<style bg="ansigray" fg="ansiwhite"> {mode.upper()} </style>'
+        f'<style bg="ansiblack"> </style>'
+        f'<style bg="ansi{net_color}" fg="ansiwhite"><b> {net_status} </b></style>'
         f'<style bg="ansiblack"> </style>'
         f'<style bg="ansigray" fg="ansiwhite"> {provider_info} </style>'
         f'<style bg="ansiblack"> </style>'
@@ -379,9 +384,17 @@ Edit it with your context, and the agent will use this at the start of every cod
             except Exception:
                 pass
 
-        print(f"\n{co(C.BOLD + C.PURPLE, '  Terminal Editor Mode')}")
+        # Print J.A.R.V.I.S. diagnostics dashboard on boot
+        try:
+            print(jarvis_system_check())
+        except Exception as e:
+            print(co(C.RED, f"  Failed to run J.A.R.V.I.S. diagnostics: {e}"))
+
+        is_offline = os.environ.get("OPENAGENT_OFFLINE") == "1"
+        status_banner = co(C.BG_RED + C.WHITE + C.BOLD, " OFFLINE ") if is_offline else co(C.BG_PURPLE + C.WHITE + C.BOLD, " ONLINE ")
+        print(f"\n{co(C.BOLD + C.PURPLE, '  Terminal Editor Mode')}  ·  {status_banner}")
         print(dim("  Type your task. Prefix with '--coding' for coding mode. '/help' to list commands."))
-        print(dim(f"  [{providers.status_line()}]  ·  SearXNG: {SEARXNG_URL}\n"))
+        print(dim(f"  [{providers.status_line()}]  ·  SearXNG: {SEARXNG_URL if not is_offline else 'offline'}\n"))
 
         commands = [
             "/coding", "/help", "/status", "/memory", "/history", "/resume",
@@ -422,10 +435,13 @@ Edit it with your context, and the agent will use this at the start of every cod
         prompt_session = PromptSession(**session_kwargs)
         chat_history = []
 
-        saved = _load_last_session()
-        if saved:
-            chat_history.extend(saved)
-            print(dim(f"\n  💾 Restored last session ({len(saved)} messages). /resume to continue."))
+        # Don't auto-restore session — it bloats the small 61k context window.
+        # Use /resume explicitly when you want to continue a previous conversation.
+        # saved = _load_last_session()
+        # if saved:
+        #     chat_history.extend(saved)
+        #     print(dim(f"\n  💾 Restored last session ({len(saved)} messages). /resume to continue."))
+        print(dim("\n  💡 Session auto-restore disabled. Use /resume to continue previous work."))
 
         last_ctrl_c_time = 0
         while True:
