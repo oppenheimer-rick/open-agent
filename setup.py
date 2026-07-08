@@ -14,7 +14,7 @@ setup(
         "webui",
         "mcp_client",
     ],
-    packages=["job_search"],
+    packages=["job_search", "core", "tools", "ui", "benchmark"],
     python_requires=">=3.10",
     install_requires=[
         "httpx",
