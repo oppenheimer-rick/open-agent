@@ -474,27 +474,24 @@ def run_agent(
                 )
                 continue
             else:
-                import mission
                 active_mission = mission.load()
                 pending_objectives = [
                     o for o in active_mission.get("objectives", [])
                     if o.get("status") in ("pending", "in_progress")
                 ]
                 if pending_objectives:
-                    ui_info("Mission is not complete yet. Nudging agent to continue...")
-                    consecutive_nudges += 1
-                    if consecutive_nudges >= 3:
-                        ui_error("Too many consecutive nudges. Aborting loop.")
-                        break
+                    ui_info("Mission has pending objectives. Presenting options to the user...")
+                    final_message = (
+                        "Mission Status Update: There are still pending objectives in the active mission:\n"
+                        + "\n".join([f"- {o['title']}" for o in pending_objectives])
+                        + "\n\nPlease let me know if you would like me to proceed with these tasks, or if we should pivot to something else."
+                    )
                     messages.append(
                         {
-                            "role": "user",
-                            "content": "You have not completed the mission yet. Pending objectives:\n"
-                            + "\n".join([f"- {o['title']}" for o in pending_objectives])
-                            + "\nPlease proceed with the next step and execute the necessary tools.",
+                            "role": "assistant",
+                            "content": final_message
                         }
                     )
-                    continue
                 else:
                     final_message = msg.get("content") or ""
             break

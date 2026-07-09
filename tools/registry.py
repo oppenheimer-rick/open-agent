@@ -1206,6 +1206,31 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "auto_patch_error",
+            "description": "Locate and repair troublesome lines/errors in a file based on compiler/traceback messages. Token-efficient: reads only error-surrounding code context, queries the LLM for a search/replace patch, applies the patch, and runs syntax verification.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative or absolute file path to patch"
+                    },
+                    "error_message": {
+                        "type": "string",
+                        "description": "The compiler traceback, syntax error, or error output message"
+                    },
+                    "hint": {
+                        "type": "string",
+                        "description": "Optional clue or instructions on how to patch the code"
+                    }
+                },
+                "required": ["path", "error_message"]
+            }
+        }
+    },
 ]
 
 # ── Smart Search & Novel Tools ────────────────────────────────────────────────
@@ -1534,6 +1559,7 @@ TOOL_MAP = {
     "replace_lines": lambda a: builtin.replace_lines(a["path"], int(a["start_line"]), int(a["end_line"]), a["content"]),
     "validate_code": lambda a: builtin.validate_code(a["path"]),
     "resume_write": lambda a: builtin.resume_write(a["path"], a["content"]),
+    "auto_patch_error": lambda a: builtin.auto_patch_error(a["path"], a["error_message"], a.get("hint", "")),
     "tool_analyze_and_improve": lambda a: __import__("out_of_the_box").tool_analyze_and_improve(a["messages_snapshot"]),
     "tool_update_objective": lambda a: __import__("out_of_the_box").tool_update_objective(a["title"], a.get("status", "in_progress")),
     "tool_add_info": lambda a: __import__("out_of_the_box").tool_add_info(a["fact"]),

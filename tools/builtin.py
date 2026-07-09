@@ -740,3 +740,175 @@ def resume_write(path: str, new_content: str) -> str:
     except Exception as e:
         return f"ERROR: {e}"
 
+
+def auto_patch_error(path: str, error_message: str, hint: str = "") -> str:
+    """Locate and repair troublesome lines/errors in a file based on compiler/traceback messages.
+    Token-efficient: reads only error-surrounding code context, queries the LLM for a search/replace patch,
+    applies the patch, and runs syntax verification.
+    """
+    p = _safe_path(path)
+    if not p.exists():
+        return f"ERROR: File '{path}' does not exist."
+
+    try:
+        content = p.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return f"ERROR: Could not read file '{path}': {e}"
+
+    lines = content.splitlines()
+    total_lines = len(lines)
+
+    # Parse line numbers from error_message
+    line_numbers = []
+    file_basename = p.name
+    # Search for line numbers specific to the target file
+    file_specific_patterns = [
+        rf"{re.escape(file_basename)}[^\n]*?(?:line\s*|L|:)\s*(\d+)",
+        rf"(?:line\s*|L|:)\s*(\d+)[^\n]*?in[^\n]*?{re.escape(file_basename)}"
+    ]
+    
+    file_specific_lines = []
+    for pat in file_specific_patterns:
+        for m in re.finditer(pat, error_message, re.IGNORECASE):
+            file_specific_lines.append(int(m.group(1)))
+
+    if file_specific_lines:
+        line_numbers = file_specific_lines
+    else:
+        # Fallback to any general line number matches
+        for m in re.finditer(r"(?:line\s*|L|:)\s*(\d+)", error_message, re.IGNORECASE):
+            val = int(m.group(1))
+            if val < total_lines + 5:
+                line_numbers.append(val)
+
+    line_numbers = sorted(list(set(line_numbers)))
+    context_chunks = []
+
+    if not line_numbers:
+        # No line numbers found; use full file if small, else chunks
+        if total_lines <= 120:
+            context_chunks.append((1, total_lines))
+        else:
+            context_chunks.append((1, 80))
+            context_chunks.append((max(1, total_lines - 20), total_lines))
+    else:
+        # Build 8-line context windows around identified lines
+        windows = []
+        for ln in line_numbers:
+            start = max(1, ln - 8)
+            end = min(total_lines, ln + 8)
+            windows.append((start, end))
+        
+        # Merge overlapping/adjacent windows
+        windows.sort()
+        merged = []
+        for current in windows:
+            if not merged:
+                merged.append(current)
+            else:
+                prev_start, prev_end = merged[-1]
+                curr_start, curr_end = current
+                if curr_start <= prev_end + 3:
+                    merged[-1] = (prev_start, max(prev_end, curr_end))
+                else:
+                    merged.append(current)
+        context_chunks = merged
+
+    # Format the code context
+    context_lines = []
+    for start, end in context_chunks:
+        context_lines.append(f"--- lines {start} to {end} ---")
+        for idx in range(start, end + 1):
+            context_lines.append(f"{idx:>5}: {lines[idx-1]}")
+    code_context = "\n".join(context_lines)
+
+    system_prompt = (
+        "You are a code repair assistant. Output a JSON object with 'search', 'replace', and 'explanation' keys to patch the file.\n"
+        "Rules: 1. Keep 'search' exact. 2. Minimal diff. 3. No markdown code blocks."
+    )
+
+    user_prompt = (
+        f"File: {path}\n"
+        f"Error:\n{error_message}\n\n"
+        f"Hint: {hint}\n\n"
+        f"Context:\n{code_context}\n"
+    )
+
+    import providers
+    llm_response = providers.generate(system_prompt, user_prompt, max_tokens=128)
+
+    # Clean response
+    clean_res = llm_response.strip()
+    if clean_res.startswith("```"):
+        lines_res = clean_res.splitlines()
+        if lines_res[0].startswith("```"):
+            lines_res = lines_res[1:]
+        if lines_res and lines_res[-1].startswith("```"):
+            lines_res = lines_res[:-1]
+        clean_res = "\n".join(lines_res).strip()
+
+    try:
+        patch_data = json.loads(clean_res)
+    except Exception:
+        # Fallback regex extraction
+        match_json = re.search(r"\{.*\}", clean_res, re.DOTALL)
+        if match_json:
+            try:
+                patch_data = json.loads(match_json.group(0))
+            except Exception:
+                return f"ERROR: LLM output was not valid JSON. Response:\n{llm_response}"
+        else:
+            return f"ERROR: LLM output was not valid JSON. Response:\n{llm_response}"
+
+    search_str = patch_data.get("search")
+    replace_str = patch_data.get("replace")
+    explanation = patch_data.get("explanation", "Auto patch applied.")
+
+    if search_str is None or replace_str is None:
+        return f"ERROR: JSON patch missing 'search' or 'replace' keys. Found: {patch_data}"
+
+    occurrences = content.count(search_str)
+    if occurrences == 0:
+        return (
+            f"ERROR: The search string generated by the LLM was not found in '{path}'.\n"
+            f"Explanation of intended fix: {explanation}\n"
+            f"Search string looked for (exact match needed):\n{repr(search_str)}"
+        )
+    if occurrences > 1:
+        return (
+            f"ERROR: The search string matched {occurrences} times in '{path}'. "
+            f"It must match exactly once. Add more context surrounding the edit."
+        )
+
+    # Apply edit
+    updated = content.replace(search_str, replace_str, 1)
+    try:
+        p.write_text(updated, encoding="utf-8")
+    except Exception as e:
+        return f"ERROR: Failed to write update to '{path}': {e}"
+
+    AGENT_MODIFIED_FILES[str(p.absolute())] = time.time()
+    ACTIVE_FILES.add(str(p.absolute()))
+
+    syntax_res = verify_syntax(str(p))
+
+    search_lc = search_str.count("\n") + 1
+    replace_lc = replace_str.count("\n") + 1
+    diff_val = replace_lc - search_lc
+    diff_str = f"+{diff_val}" if diff_val >= 0 else str(diff_val)
+
+    report = (
+        f"SUCCESS: Auto-patched '{path}'\n"
+        f"Explanation: {explanation}\n"
+        f"Lines replaced: {search_lc} → {replace_lc} (delta {diff_str})\n"
+        f"Syntax check: {syntax_res}\n\n"
+        f"--- Diff applied ---\n"
+    )
+    for ln in search_str.splitlines():
+        report += f"  - {ln}\n"
+    for ln in replace_str.splitlines():
+        report += f"  + {ln}\n"
+
+    return report
+
+

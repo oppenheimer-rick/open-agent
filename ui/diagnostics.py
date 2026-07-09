@@ -176,14 +176,11 @@ def jarvis_system_check() -> str:
         t_hn.join(timeout=0.25)
         t_wiki.join(timeout=0.25)
     
-    # Format JARVIS boot screen
+    # Format boot screen
     lines = []
-    lines.append(co(C.BOLD + C.CYAN, "  🤖 J.A.R.V.I.S. Diagnostics Protocol"))
-    lines.append(dim("  " + "─" * 74))
-    lines.append(f"  {greeting}")
-    lines.append(f"  • {co(C.BOLD, 'Power Source:')}     {battery_status}")
     lines.append(f"  • {co(C.BOLD, 'Load & Memory:')}    {load_str}  ·  {mem_str}")
-    lines.append(f"  • {co(C.BOLD, 'Workspace:')}        {git_status}")
+    cwd = os.getcwd()
+    lines.append(f"  • {co(C.BOLD, 'Workspace:')}        {cwd} ({git_status})")
     lines.append(f"  • {co(C.BOLD, 'Neural Link:')}      Local LLM Backend: {co(C.GREEN if llm_status == 'ONLINE' else C.RED, llm_status)}")
     if is_offline:
         lines.append(f"  • {co(C.BOLD, 'Network Grid:')}     {co(C.RED, 'OFFLINE')} (isolated mode)")
@@ -205,7 +202,6 @@ def jarvis_system_check() -> str:
         for w_line in wiki_article["extract_lines"]:
             lines.append(f"     {w_line}")
 
-    lines.append(dim("  " + "─" * 74))
     return "\n".join(lines)
 
 def check_and_summarize_obsidian_vault(force_scan=False, silent=False) -> str:
