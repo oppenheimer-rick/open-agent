@@ -87,8 +87,8 @@ class LRUCache:
         return self._cache[key]
 
     def set(self, key: str, value: str):
-        # NEVER cache STOP messages — let the agent retry in a new session
-        if value.startswith("STOP:"):
+        # NEVER cache STOP or ERROR messages — let the agent retry in a new session
+        if value.startswith("STOP:") or value.startswith("ERROR:"):
             return
         self._cache[key] = value
         self._timestamps[key] = time.monotonic()
@@ -470,9 +470,9 @@ def search_web(query: str, max_results: int = 3, current: bool = True) -> str:
     tiers = [
         ("ddgs", _ddgs_search),
         ("Lite", _lite_search),
-        ("Wiki", _wiki_search),
-        ("DDG HTML", _ddg_html_search),
         ("SearXNG", _searxng_search),
+        ("DDG HTML", _ddg_html_search),
+        ("Wiki", _wiki_search),
     ]
 
     all_results = []
@@ -552,9 +552,18 @@ def _spa_blocked(url: str) -> bool:
 
 
 def web_fetch(url: str, query: str = "") -> str:
-    """Fetch a URL and return compact text content. Returns 'STOP: …' on any error."""
-    if _spa_blocked(url):
-        return f"STOP: {url} is a known JS-heavy domain. Use search snippets instead."
+    """Fetch a URL and return compact text content. Returns 'ERROR: …' on any error."""
+    is_raw = any(x in url for x in [
+        "raw.githubusercontent.com", "gist.githubusercontent.com",
+        ".txt", ".py", ".js", ".md",
+    ])
+
+    # If it is a known JS-heavy / protected site, try Playwright directly (unless raw)
+    if _spa_blocked(url) and not is_raw:
+        pw_res = browse_web(url, action="scrape")
+        if not pw_res.startswith("STOP:"):
+            return f"--- PAGE (Rendered): {url} ---\n{pw_res[:4000]}\n--- END ---"
+        # If Playwright failed, log and we will still try HTTPX as fallback
 
     import httpx
     from bs4 import BeautifulSoup
@@ -562,11 +571,6 @@ def web_fetch(url: str, query: str = "") -> str:
     try:
         if "github.com" in url and "/blob/" in url:
             url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
-
-        is_raw = any(x in url for x in [
-            "raw.githubusercontent.com", "gist.githubusercontent.com",
-            ".txt", ".py", ".js", ".md",
-        ])
 
         resp = httpx.get(
             url, timeout=5.0, follow_redirects=True,
@@ -599,16 +603,28 @@ def web_fetch(url: str, query: str = "") -> str:
         )
 
         if not clean.strip():
-            return "STOP: Page appears to be empty or JS-rendered."
+            # Clean text is empty, try Playwright fallback
+            pw_res = browse_web(url, action="scrape")
+            if not pw_res.startswith("STOP:"):
+                return f"--- PAGE (Rendered): {url} ---\n{pw_res[:4000]}\n--- END ---"
+            return "ERROR: Page appears to be empty or JS-rendered."
 
         return f"--- PAGE: {url} ---\n{clean[:4000]}\n--- END ---"
 
-    except httpx.HTTPStatusError as e:
-        return f"STOP: HTTP {e.response.status_code} — cannot fetch {url}."
-    except httpx.ConnectError:
-        return f"STOP: Cannot reach {urlparse(url).netloc} (connection error)."
     except Exception as e:
-        return f"STOP: Failed to fetch URL: {e}."
+        # Fallback to Playwright if HTTPX failed (except for raw text URLs)
+        if not is_raw:
+            pw_res = browse_web(url, action="scrape")
+            if not pw_res.startswith("STOP:"):
+                return f"--- PAGE (Rendered): {url} ---\n{pw_res[:4000]}\n--- END ---"
+        
+        # Determine actual error reason for error message
+        if isinstance(e, httpx.HTTPStatusError):
+            return f"ERROR: HTTP {e.response.status_code} — cannot fetch {url}."
+        elif isinstance(e, httpx.ConnectError):
+            return f"ERROR: Cannot reach {urlparse(url).netloc} (connection error)."
+        else:
+            return f"ERROR: Failed to fetch URL: {e}."
 
 
 # ── RAG helper ───────────────────────────────────────────────────────────────
@@ -672,7 +688,7 @@ def search_second_brain(query: str, top_k: int = 5) -> str:
 def scout_website(url: str, depth: int = 1) -> str:
     """Fetch a URL, extract top internal links, fetch those too."""
     base = web_fetch(url)
-    if base.startswith("STOP"):
+    if base.startswith("STOP") or base.startswith("ERROR"):
         return base
 
     links = re.findall(r'href=[\'"]?([^\'">]+)', base)

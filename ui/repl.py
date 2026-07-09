@@ -86,6 +86,168 @@ def _format_sessions_table(sessions: list) -> str:
         )
     return "\n".join(lines)
 
+def run_local_oauth_flow(client_id, client_secret):
+    """Run a local OAuth2 authorization flow, spinning up a temporary HTTP server on port 8080."""
+    import http.server
+    import socketserver
+    import webbrowser
+    import urllib.parse
+    import threading
+    import httpx
+    import secrets
+
+    redirect_uri = "http://localhost:8080"
+    auth_code = None
+    server_instance = None
+    # CSRF mitigation: Generate cryptographically secure state parameter
+    oauth_state = secrets.token_hex(16)
+    
+    class OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            nonlocal auth_code
+            parsed_url = urllib.parse.urlparse(self.path)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            
+            # CSRF mitigation check
+            received_state = query_params.get("state", [None])[0]
+            if received_state != oauth_state:
+                self.send_response(400)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                html = """
+                <html>
+                <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #121212; color: #ff3333;">
+                    <div style="text-align: center; border: 1px solid #ff3333; padding: 40px; border-radius: 10px; background-color: #1e1e1e; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <h1>✗ Security Error</h1>
+                        <p style="color: #aaaaaa;">CSRF validation failed: State parameter mismatch. Linking aborted.</p>
+                    </div>
+                </body>
+                </html>
+                """
+                self.wfile.write(html.encode("utf-8"))
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            
+            if "code" in query_params:
+                auth_code = query_params["code"][0]
+                html = """
+                <html>
+                <body style="font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #121212; color: #ffffff;">
+                    <div style="text-align: center; border: 1px solid #333; padding: 40px; border-radius: 10px; background-color: #1e1e1e; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <h1 style="color: #4caf50; margin-bottom: 20px;">✓ Authentication Successful</h1>
+                        <p style="color: #aaaaaa;">Google Account successfully linked to open-agent.</p>
+                        <p style="color: #666666; font-size: 14px; margin-top: 20px;">You can close this tab and return to the terminal.</p>
+                    </div>
+                </body>
+                </html>
+                """
+                self.wfile.write(html.encode("utf-8"))
+                threading.Thread(target=server_instance.shutdown).start()
+            else:
+                html = "<html><body><h1>Error connecting account. Close this window and try again.</h1></body></html>"
+                self.wfile.write(html.encode("utf-8"))
+
+        def log_message(self, format, *args):
+            pass
+
+    # Ensure TCPServer binds only to 127.0.0.1 (localhost)
+    socketserver.TCPServer.allow_reuse_address = True
+    try:
+        server_instance = socketserver.TCPServer(("127.0.0.1", 8080), OAuthCallbackHandler)
+    except Exception as e:
+        print(f"\n  Error: Could not start local server on port 8080 ({e}).")
+        return None
+
+    scopes = "https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email"
+    auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth?"
+        + urllib.parse.urlencode({
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": scopes,
+            "state": oauth_state,
+            "access_type": "offline",
+            "prompt": "consent"
+        })
+    )
+    
+    print(f"\n  🔗 Opening browser for Google Sign-in...")
+    print(f"  If the browser doesn't open automatically, click here:\n  {auth_url}\n")
+    
+    # Thread leak mitigation: 5-minute auto-timeout
+    def auto_timeout_checker():
+        time.sleep(300) # 5 minutes
+        if not auth_code:
+            print(co(C.RED, "\n  ⚠ OAuth login session timed out (5 mins). Shutting down local server..."))
+            try:
+                server_instance.shutdown()
+            except Exception:
+                pass
+
+    timeout_thread = threading.Thread(target=auto_timeout_checker, daemon=True)
+    timeout_thread.start()
+
+    server_thread = threading.Thread(target=server_instance.serve_forever)
+    server_thread.start()
+    
+    try:
+        webbrowser.open(auth_url)
+    except Exception:
+        pass
+        
+    server_thread.join()
+    server_instance.server_close()
+    
+    if not auth_code:
+        print("  Error: Authorization code not received or session timed out.")
+        return None
+        
+    print("  Exchanging authorization code for tokens...")
+    try:
+        r = httpx.post("https://oauth2.googleapis.com/token", data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": auth_code,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code"
+        })
+        if r.status_code == 200:
+            tokens = r.json()
+            access_token = tokens.get("access_token")
+            refresh_token = tokens.get("refresh_token")
+            expires_in = tokens.get("expires_in", 3600)
+            
+            ru = httpx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={
+                "Authorization": f"Bearer {access_token}"
+            })
+            if ru.status_code == 200:
+                userinfo = ru.json()
+                email_address = userinfo.get("email")
+                if email_address:
+                    return {
+                        "imap_host": "imap.gmail.com",
+                        "imap_port": 993,
+                        "imap_user": email_address,
+                        "access_token": access_token,
+                        "refresh_token": refresh_token,
+                        "token_expires_at": time.time() + expires_in,
+                        "smtp_host": "smtp.gmail.com",
+                        "smtp_port": 587,
+                        "auth_type": "oauth2"
+                    }
+            else:
+                print(f"  Error fetching userinfo: {ru.text}")
+        else:
+            print(f"  Error exchanging code: {r.text}")
+    except Exception as e:
+        print(f"  Error during token exchange: {e}")
+        
+    return None
+
 def _render_loaded_messages(msgs: list, count: int = 6):
     """Display the last N messages from a loaded session for context."""
     if not msgs:
@@ -401,7 +563,7 @@ Edit it with your context, and the agent will use this at the start of every cod
             "/search", "/tools", "/session", "/rename-session", "/search-sessions",
             "/mission", "/ootb", "/skills", "/load-skill", "/clear", "/new",
             "/quit", "/benchmark", "/obsidian-vault", "/job-search", "/webui",
-            "/mcp", "/play",
+            "/mcp", "/play", "/mail",
         ]
         completer = WordCompleter(commands, ignore_case=True, sentence=True)
         bindings = KeyBindings()
@@ -485,6 +647,7 @@ Edit it with your context, and the agent will use this at the start of every cod
                     print(dim("  /job-search <path>    Scout and auto-fill matching jobs"))
                     print(dim("  /webui                Launch web UI server (FastAPI)"))
                     print(dim("  /mcp [sub]            MCP: connect/disconnect/init/status"))
+                    print(dim("  /mail                 Manage and read your local/remote email"))
                     print("")
                     print(co(C.CYAN, "  ── Session Management ──"))
                     print(dim("  /history              List / select past sessions"))
@@ -623,6 +786,259 @@ Edit it with your context, and the agent will use this at the start of every cod
                     else:
                         import mcp_client
                         print(mcp_client.status())
+                elif cmd == "/mail":
+                    config = config_load()
+                    accounts = config.get("mail_accounts", [])
+                    old_user = config.get("mail_imap_user")
+                    old_password = config.get("mail_imap_password")
+                    if old_user and old_password and not any(a.get("imap_user") == old_user for a in accounts):
+                        accounts.append({
+                            "imap_host": config.get("mail_imap_host", "imap.gmail.com"),
+                            "imap_port": int(config.get("mail_imap_port", 993)),
+                            "imap_user": old_user,
+                            "imap_password": old_password,
+                            "smtp_host": config.get("mail_smtp_host", "smtp.gmail.com"),
+                            "smtp_port": int(config.get("mail_smtp_port", 587)),
+                        })
+                        config["mail_accounts"] = accounts
+                        config_save(config)
+
+                    run_wizard = not accounts
+                    if run_wizard:
+                        print(co(C.CYAN, "\n  ✉ No email accounts configured yet."))
+                        print(co(C.CYAN, "  Choose setup method:"))
+                        print(dim("    [1] Sign in with Google (OAuth2 - Recommended for Gmail)"))
+                        print(dim("    [2] App Password (IMAP/SMTP - Proton, iCloud, Yahoo, custom)"))
+                        print(dim("    [c] Cancel\n"))
+                        setup_opt = input("  Select setup option: ").strip().lower()
+                        if setup_opt == "c" or not setup_opt:
+                            continue
+                        elif setup_opt == "1":
+                            client_id = config.get("google_client_id")
+                            client_secret = config.get("google_client_secret")
+                            if not client_id or not client_secret:
+                                print(co(C.YELLOW, "\n  ✉ Google OAuth2 configuration is missing."))
+                                print(co(C.CYAN, "  To enable \"Sign in with Google\", you need a free Client ID & Secret from Google Cloud Console."))
+                                print(co(C.CYAN, "  Setup is fast (1-2 mins):"))
+                                print(dim("    1. Go to Google Cloud Console: https://console.developers.google.com/"))
+                                print(dim("    2. Create a new project, then search & enable the 'Gmail API'."))
+                                print(dim("    3. Configure 'OAuth consent screen' as 'External' and add your Gmail to 'Test Users'."))
+                                print(dim("    4. Under 'Credentials', click 'Create Credentials' -> 'OAuth client ID'."))
+                                print(dim("    5. Choose 'Desktop app' as Application type and click Create."))
+                                print(dim("    6. Copy the Client ID and Client Secret.\n"))
+                                client_id = input("  Google Client ID: ").strip()
+                                if not client_id:
+                                    print(co(C.RED, "  Skipped configuration."))
+                                    continue
+                                client_secret = input("  Google Client Secret: ").strip()
+                                if not client_secret:
+                                    print(co(C.RED, "  Skipped configuration."))
+                                    continue
+                                config["google_client_id"] = client_id
+                                config["google_client_secret"] = client_secret
+                                config_save(config)
+                                print(co(C.GREEN, "  ✓ Google OAuth2 credentials saved successfully!\n"))
+                            
+                            new_acc = run_local_oauth_flow(client_id, client_secret)
+                            if new_acc:
+                                accounts.append(new_acc)
+                                config["mail_accounts"] = accounts
+                                config_save(config)
+                                print(co(C.GREEN, f"  ✓ Account {new_acc.get('imap_user')} saved successfully!"))
+                                print(co(C.CYAN, "  Connecting to inbox to verify..."))
+                                try:
+                                    from dynamic_tools.read_emails import read_emails
+                                    result = read_emails(limit=5, email_address=new_acc.get('imap_user'))
+                                    print(result)
+                                except Exception as e:
+                                    print(co(C.RED, f"  Failed to run verification: {e}"))
+                        elif setup_opt == "2":
+                            import getpass
+                            print(co(C.YELLOW, "\n  ✉ Configuring new email account (IMAP/SMTP password)."))
+                            print(co(C.CYAN, "  (Press Enter to accept defaults, or leave blank to skip/cancel)\n"))
+                            imap_host = input("  IMAP Host (default: imap.gmail.com): ").strip() or "imap.gmail.com"
+                            imap_user = input("  Email Address: ").strip()
+                            if not imap_user:
+                                print(co(C.RED, "  Skipped configuration. Email address is required."))
+                                continue
+                            imap_password = getpass.getpass("  App Password (hidden/app-specific): ").strip()
+                            if not imap_password:
+                                print(co(C.RED, "  Skipped configuration. Password is required."))
+                                continue
+                            try:
+                                imap_port_val = input("  IMAP Port (default: 993): ").strip()
+                                imap_port = int(imap_port_val) if imap_port_val else 993
+                            except ValueError:
+                                imap_port = 993
+                            smtp_host = input("  SMTP Host (default: smtp.gmail.com): ").strip() or "smtp.gmail.com"
+                            try:
+                                smtp_port_val = input("  SMTP Port (default: 587): ").strip()
+                                smtp_port = int(smtp_port_val) if smtp_port_val else 587
+                            except ValueError:
+                                smtp_port = 587
+                            
+                            new_acc = {
+                                "imap_host": imap_host,
+                                "imap_port": imap_port,
+                                "imap_user": imap_user,
+                                "imap_password": imap_password,
+                                "smtp_host": smtp_host,
+                                "smtp_port": smtp_port,
+                                "auth_type": "password"
+                            }
+                            accounts.append(new_acc)
+                            config["mail_accounts"] = accounts
+                            config_save(config)
+                            print(co(C.GREEN, f"  ✓ Account {imap_user} saved successfully!"))
+                            print(co(C.CYAN, "  Connecting to inbox to verify..."))
+                            try:
+                                from dynamic_tools.read_emails import read_emails
+                                result = read_emails(limit=5, email_address=imap_user)
+                                print(result)
+                                if "Application-specific password required" in result:
+                                    print(co(C.YELLOW, "\n  💡 How to Fix Google Auth Failure:"))
+                                    print(dim("    1. Go to your Google Account Security Settings: https://myaccount.google.com/security"))
+                                    print(dim("    2. Ensure '2-Step Verification' is turned ON."))
+                                    print(dim("    3. Navigate to: https://myaccount.google.com/apppasswords"))
+                                    print(dim("    4. Generate a new App Password (e.g. name it 'open-agent')."))
+                                    print(dim("    5. Copy the 16-character code (without spaces)."))
+                                    print(dim("    6. Run `/mail` again, remove the failed account, and re-add it with the App Password."))
+                            except Exception as e:
+                                print(co(C.RED, f"  Failed to run verification: {e}"))
+                    else:
+                        print(co(C.CYAN, f"\n  ✉ Configured Email Accounts ({len(accounts)}):"))
+                        for idx, acc in enumerate(accounts, 1):
+                            auth_desc = "OAuth2" if acc.get("auth_type") == "oauth2" else "Password"
+                            print(dim(f"    [{idx}] {acc.get('imap_user')} ({auth_desc} - {acc.get('imap_host')})"))
+                        print("")
+                        print(co(C.CYAN, "  Options: "))
+                        print(dim("    [g] Add Gmail account via Sign in with Google (OAuth2)"))
+                        print(dim("    [p] Add other account via App Password (IMAP/SMTP)"))
+                        print(dim("    [r] Remove an account"))
+                        print(dim("    [v] Verify / Read all configured accounts"))
+                        print(dim("    [1-N] Verify / Read specific account"))
+                        print(dim("    [c] Cancel\n"))
+                        
+                        opt = input("  Choose an option: ").strip().lower()
+                        if opt == "c" or not opt:
+                            continue
+                        elif opt == "g":
+                            client_id = config.get("google_client_id")
+                            client_secret = config.get("google_client_secret")
+                            if not client_id or not client_secret:
+                                print(co(C.YELLOW, "\n  ✉ Google OAuth2 configuration is missing."))
+                                print(co(C.CYAN, "  To enable \"Sign in with Google\", you need a free Client ID & Secret from Google Cloud Console."))
+                                print(co(C.CYAN, "  Setup is fast (1-2 mins):"))
+                                print(dim("    1. Go to Google Cloud Console: https://console.developers.google.com/"))
+                                print(dim("    2. Create a new project, then search & enable the 'Gmail API'."))
+                                print(dim("    3. Configure 'OAuth consent screen' as 'External' and add your Gmail to 'Test Users'."))
+                                print(dim("    4. Under 'Credentials', click 'Create Credentials' -> 'OAuth client ID'."))
+                                print(dim("    5. Choose 'Desktop app' as Application type and click Create."))
+                                print(dim("    6. Copy the Client ID and Client Secret.\n"))
+                                client_id = input("  Google Client ID: ").strip()
+                                if not client_id:
+                                    print(co(C.RED, "  Skipped configuration."))
+                                    continue
+                                client_secret = input("  Google Client Secret: ").strip()
+                                if not client_secret:
+                                    print(co(C.RED, "  Skipped configuration."))
+                                    continue
+                                config["google_client_id"] = client_id
+                                config["google_client_secret"] = client_secret
+                                config_save(config)
+                                print(co(C.GREEN, "  ✓ Google OAuth2 credentials saved successfully!\n"))
+                            
+                            new_acc = run_local_oauth_flow(client_id, client_secret)
+                            if new_acc:
+                                accounts.append(new_acc)
+                                config["mail_accounts"] = accounts
+                                config_save(config)
+                                print(co(C.GREEN, f"  ✓ Account {new_acc.get('imap_user')} saved successfully!"))
+                            continue
+                        elif opt == "p":
+                            import getpass
+                            print(co(C.YELLOW, "\n  ✉ Configuring new email account (IMAP/SMTP password)."))
+                            print(co(C.CYAN, "  (Press Enter to accept defaults, or leave blank to skip/cancel)\n"))
+                            imap_host = input("  IMAP Host (default: imap.gmail.com): ").strip() or "imap.gmail.com"
+                            imap_user = input("  Email Address: ").strip()
+                            if not imap_user:
+                                print(co(C.RED, "  Skipped configuration. Email address is required."))
+                                continue
+                            if any(a.get("imap_user").lower() == imap_user.lower() for a in accounts):
+                                print(co(C.RED, f"  Account {imap_user} is already configured."))
+                                continue
+                            imap_password = getpass.getpass("  App Password (hidden/app-specific): ").strip()
+                            if not imap_password:
+                                print(co(C.RED, "  Skipped configuration. Password is required."))
+                                continue
+                            try:
+                                imap_port_val = input("  IMAP Port (default: 993): ").strip()
+                                imap_port = int(imap_port_val) if imap_port_val else 993
+                            except ValueError:
+                                imap_port = 993
+                            smtp_host = input("  SMTP Host (default: smtp.gmail.com): ").strip() or "smtp.gmail.com"
+                            try:
+                                smtp_port_val = input("  SMTP Port (default: 587): ").strip()
+                                smtp_port = int(smtp_port_val) if smtp_port_val else 587
+                            except ValueError:
+                                smtp_port = 587
+                            
+                            new_acc = {
+                                "imap_host": imap_host,
+                                "imap_port": imap_port,
+                                "imap_user": imap_user,
+                                "imap_password": imap_password,
+                                "smtp_host": smtp_host,
+                                "smtp_port": smtp_port,
+                                "auth_type": "password"
+                            }
+                            accounts.append(new_acc)
+                            config["mail_accounts"] = accounts
+                            config_save(config)
+                            print(co(C.GREEN, f"  ✓ Account {imap_user} saved successfully!"))
+                            continue
+                        elif opt == "r":
+                            val = input("  Enter account number to remove: ").strip()
+                            try:
+                                rem_idx = int(val) - 1
+                                if 0 <= rem_idx < len(accounts):
+                                    removed = accounts.pop(rem_idx)
+                                    config["mail_accounts"] = accounts
+                                    config_save(config)
+                                    print(co(C.GREEN, f"  ✓ Removed account {removed.get('imap_user')}"))
+                                else:
+                                    print(co(C.RED, "  Invalid index."))
+                            except ValueError:
+                                print(co(C.RED, "  Invalid index."))
+                            continue
+                        elif opt == "v":
+                            email_filter = None
+                        elif opt.isdigit():
+                            sel_idx = int(opt) - 1
+                            if 0 <= sel_idx < len(accounts):
+                                email_filter = accounts[sel_idx].get("imap_user")
+                            else:
+                                print(co(C.RED, "  Invalid index."))
+                                continue
+                        else:
+                            print(co(C.RED, "  Invalid option."))
+                            continue
+                            
+                        print(co(C.CYAN, "  Connecting to inbox to verify..."))
+                        try:
+                            from dynamic_tools.read_emails import read_emails
+                            result = read_emails(limit=5, email_address=email_filter)
+                            print(result)
+                            if "Application-specific password required" in result:
+                                print(co(C.YELLOW, "\n  💡 How to Fix Google Auth Failure:"))
+                                print(dim("    1. Go to your Google Account Security Settings: https://myaccount.google.com/security"))
+                                print(dim("    2. Ensure '2-Step Verification' is turned ON."))
+                                print(dim("    3. Navigate to: https://myaccount.google.com/apppasswords"))
+                                print(dim("    4. Generate a new App Password (e.g. name it 'open-agent')."))
+                                print(dim("    5. Copy the 16-character code (without spaces)."))
+                                print(dim("    6. Run `/mail` again, remove the failed account, and re-add it with the App Password."))
+                        except Exception as e:
+                            print(co(C.RED, f"  Failed to run verification: {e}"))
                 elif cmd == "/session":
                     if not rest:
                         sessions = session_list(10)

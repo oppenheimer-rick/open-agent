@@ -33,9 +33,12 @@ def config_load() -> dict:
         return {}
 
 def config_save(config: dict):
-    """Save config to ~/.agentic-loop/config.json."""
+    """Save config to ~/.agentic-loop/config.json with restricted permissions (owner-only)."""
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure file exists and set owner-only permissions (600)
+        CONFIG_FILE.touch(exist_ok=True)
+        CONFIG_FILE.chmod(0o600)
         CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
     except Exception:
         pass

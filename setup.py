@@ -28,6 +28,9 @@ setup(
         "pyee",
         "greenlet",
     ],
+    extras_require={
+        "mail": [],
+    },
     entry_points={
         "console_scripts": [
             "openagent=loop:main",
