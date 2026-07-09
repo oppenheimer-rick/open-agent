@@ -578,8 +578,21 @@ Edit it with your context, and the agent will use this at the start of every cod
 
         @bindings.add("c-o")
         def _(event):
-            from tools.registry import show_tool_history
-            print("\n" + show_tool_history())
+            import core.state
+            from tools.registry import tool_result_show, _tool_results_buffer
+            current = getattr(core.state, "EXPAND_TOOL_OUTPUT", False)
+            new_state = not current
+            core.state.EXPAND_TOOL_OUTPUT = new_state
+            
+            if new_state:
+                print("\n" + co(C.GREEN, "  ℹ Output expansion enabled (full outputs will be shown)"))
+                if _tool_results_buffer:
+                    print(tool_result_show(-1))
+                else:
+                    print(dim("  No tool execution history to show yet."))
+            else:
+                print("\n" + co(C.YELLOW, "  ℹ Output expansion disabled (outputs will be truncated)"))
+            event.app.invalidate()
 
         @bindings.add("c-b")
         def _(event):

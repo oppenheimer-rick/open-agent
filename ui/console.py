@@ -188,13 +188,18 @@ def ui_tool_call(name, args: dict, result=None, error=False):
         print(f"  {co(C.PINK, '•')} {co(C.GRAY, k + ':')} {co(C.WHITE, val)}")
 
     if result is not None:
+        import core.state
         result_lines = str(result).splitlines()
         r_color = C.RED if error else C.GRAY
-        preview = result_lines[:15]
-        for ln in preview:
-            print(f"    {co(r_color, trunc(ln, width - 6))}")
-        if len(result_lines) > 15:
-            print(dim(f"    ... {len(result_lines) - 15} more lines"))
+        if getattr(core.state, "EXPAND_TOOL_OUTPUT", False):
+            for ln in result_lines:
+                print(f"    {co(r_color, trunc(ln, width - 6))}")
+        else:
+            preview = result_lines[:15]
+            for ln in preview:
+                print(f"    {co(r_color, trunc(ln, width - 6))}")
+            if len(result_lines) > 15:
+                print(dim(f"    ... {len(result_lines) - 15} more lines"))
 
     print(co(color, "  " + "─" * (width - 2)))
 
