@@ -231,11 +231,42 @@ def center_ansi(text: str, width: int) -> str:
     right_pad = pad - left_pad
     return " " * left_pad + text + " " * right_pad
 
+# ── Logos ────────────────────────────────────────────────────────────────────
+LOGO_WIDE = r"""
+┌───────────────────────────────────────────────────────────────┐
+│                                                               │
+│   ░░▒▒▓▓  █▀█ █▀█ █▀▀ █▄ █    ▄▀█ █▀▀ █▀▀ █▄ █ ▀█▀   ▓▓▒▒░░   │
+│   ░░▒▒▓▓  █▄█ █▀▀ ██▄ █ ▀█    █▀█ █▄█ ██▄ █ ▀█   █    ▓▓▒▒░░   │
+│                                                               │
+│       local-first · privacy-first · intelligence-driven       │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+"""
+
+LOGO_NARROW = r"""
+┌────────────────────────────────────────────────────┐
+│  ░▒▓ █▀█ █▀█ █▀▀ █▄ █ ▄▄ ▄▀█ █▀▀ █▀▀ █▄ █ ▀█▀ ▓▒░  │
+│  ░▒▓ █▄█ █▀▀ ██▄ █ ▀█    █▀█ █▄█ ██▄ █ ▀█  █  ▓▒░  │
+└────────────────────────────────────────────────────┘
+"""
+
 def ui_banner():
     width = terminal_width()
     print("\n")
-    print(center_ansi(co(C.BOLD + C.WHITE, "=== open-agent ==="), width))
-    print(center_ansi(co(C.CYAN, "local-first · privacy-first · intelligence-driven"), width))
+    logo = ""
+    if width >= 65:
+        logo = LOGO_WIDE
+    elif width >= 54:
+        logo = LOGO_NARROW
+    else:
+        # Fallback for very small terminals
+        print(center_ansi(co(C.BOLD + C.WHITE, "=== open-agent ==="), width))
+        print(center_ansi(co(C.CYAN, "local-first · privacy-first · intelligence-driven"), width))
+        print("\n")
+        return
+
+    for line in logo.strip("\n").split("\n"):
+        print(center_ansi(co(C.CYAN, line), width))
     print("\n")
 
 def pad_line(text: str, width: int = 80, bg: str = "") -> str:

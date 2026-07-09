@@ -31,3 +31,9 @@ ddg_lite_test.html
 demo_resume.txt
 hello.py
 .agent_mission.json
+
+# Benchmarks
+benchmark_reports/
+benchmark/results.json
+benchmark/reports/
+benchmark/*.jsonl

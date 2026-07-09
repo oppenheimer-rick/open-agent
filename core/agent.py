@@ -30,6 +30,15 @@ def repair_json_args(raw_args: str, fn_name: str = "") -> str:
     """Attempt to repair truncated or malformed JSON arguments from local LLMs."""
     fixed = raw_args.strip()
 
+    # Strip markdown code block formatting if present
+    if fixed.startswith("```"):
+        lines = fixed.splitlines()
+        if len(lines) > 1 and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        fixed = "\n".join(lines).strip()
+
     # 1. Fix unescaped newlines/tabs which local LLMs often output raw
     fixed = fixed.replace("\n", "\\n").replace("\t", "\\t")
 
@@ -48,6 +57,13 @@ def repair_json_args(raw_args: str, fn_name: str = "") -> str:
         json.loads(fixed)
         return fixed
     except json.JSONDecodeError:
+        import ast
+        try:
+            parsed = ast.literal_eval(fixed)
+            if isinstance(parsed, dict):
+                return json.dumps(parsed)
+        except Exception:
+            pass
         return raw_args
 
 def llm_generate(system_prompt: str, user_prompt: str, max_tokens: int = 512) -> str:
@@ -259,12 +275,18 @@ def run_agent(
     system = SYSTEM_CODING if mode == "coding" else SYSTEM_GENERAL
     memory_context = auto_memory_context(user_message)
 
+    if chat_history is None:
+        chat_history = []
+
+    is_fresh_session = not chat_history
+
     global ACTIVE_MESSAGES
-    if not chat_history:
-        messages = [
+    if is_fresh_session:
+        messages = chat_history
+        messages.extend([
             {"role": "system", "content": system},
             {"role": "system", "content": grounding},
-        ]
+        ])
         if memory_context:
             messages.append({"role": "system", "content": memory_context})
 
@@ -322,8 +344,9 @@ def run_agent(
     _completed_writes = set()
     _write_completion_signaled = set()
     stop_search = False
+    consecutive_nudges = 0
 
-    if not chat_history:
+    if is_fresh_session:
         mission.migrate_from_todo_file()
         mission_state = mission.render()
         if mission_state:
@@ -426,6 +449,10 @@ def run_agent(
             content_str = (msg.get("content") or "").strip()
             if not content_str:
                 ui_info("Agent returned empty response. Nudging to continue...")
+                consecutive_nudges += 1
+                if consecutive_nudges >= 3:
+                    ui_error("Too many consecutive empty responses. Aborting loop.")
+                    break
                 messages.append(
                     {
                         "role": "user",
@@ -435,6 +462,10 @@ def run_agent(
                 continue
             elif content_str.endswith(":"):
                 ui_info("Agent output ended with a trailing colon. Nudging to invoke the tool call...")
+                consecutive_nudges += 1
+                if consecutive_nudges >= 3:
+                    ui_error("Too many consecutive nudges. Aborting loop.")
+                    break
                 messages.append(
                     {
                         "role": "user",
@@ -443,7 +474,29 @@ def run_agent(
                 )
                 continue
             else:
-                final_message = msg.get("content") or ""
+                import mission
+                active_mission = mission.load()
+                pending_objectives = [
+                    o for o in active_mission.get("objectives", [])
+                    if o.get("status") in ("pending", "in_progress")
+                ]
+                if pending_objectives:
+                    ui_info("Mission is not complete yet. Nudging agent to continue...")
+                    consecutive_nudges += 1
+                    if consecutive_nudges >= 3:
+                        ui_error("Too many consecutive nudges. Aborting loop.")
+                        break
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "You have not completed the mission yet. Pending objectives:\n"
+                            + "\n".join([f"- {o['title']}" for o in pending_objectives])
+                            + "\nPlease proceed with the next step and execute the necessary tools.",
+                        }
+                    )
+                    continue
+                else:
+                    final_message = msg.get("content") or ""
             break
 
         if finish_reason == "length":
@@ -467,6 +520,8 @@ def run_agent(
                 )
             continue
         run_agent._truncation_count = 0
+        if tool_calls:
+            consecutive_nudges = 0
 
         # Execute tool calls
         for tc in tool_calls:
@@ -491,25 +546,29 @@ def run_agent(
                 }
             )
 
-            handler = TOOL_MAP.get(fn_name)
-            if handler:
-                try:
-                    result = handler(args)
-                    error = str(result).startswith("ERROR")
-                except AgentInterrupted:
-                    renderer.stop_spinner()
-                    ui_info("Interrupted during tool execution.")
-                    return
-                except KeyboardInterrupt:
-                    renderer.stop_spinner()
-                    ui_info("Interrupted during tool execution.")
-                    return
-                except Exception as e:
-                    result = f"TOOL EXCEPTION: {e}"
-                    error = True
-            else:
-                result = f"ERROR: Unknown tool '{fn_name}'"
+            if stop_search and fn_name in ("search_web", "smart_search", "web_fetch", "scout_website"):
+                result = "ERROR: Search and fetch tools are disabled for the rest of this session due to a previous stop signal."
                 error = True
+            else:
+                handler = TOOL_MAP.get(fn_name)
+                if handler:
+                    try:
+                        result = handler(args)
+                        error = str(result).startswith("ERROR")
+                    except AgentInterrupted:
+                        renderer.stop_spinner()
+                        ui_info("Interrupted during tool execution.")
+                        return
+                    except KeyboardInterrupt:
+                        renderer.stop_spinner()
+                        ui_info("Interrupted during tool execution.")
+                        return
+                    except Exception as e:
+                        result = f"TOOL EXCEPTION: {e}"
+                        error = True
+                else:
+                    result = f"ERROR: Unknown tool '{fn_name}'"
+                    error = True
 
             renderer.handle(
                 {
@@ -574,8 +633,6 @@ def run_agent(
                 final_message = f"Completed writing {path}"
                 break
         if looped:
-            break
-        if stop_search:
             break
     else:
         ui_error(f"Reached max steps ({max_steps}). Stopping.")

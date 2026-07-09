@@ -738,6 +738,24 @@ Edit it with your context, and the agent will use this at the start of every cod
                 print(dim("  Usage: --coding <your task here>"))
                 continue
 
+            # Auto-resume last session on "continue"/"c"/"cont" if history is empty
+            if task.lower() in ("continue", "c", "cont") and not chat_history:
+                last_msgs = _load_last_session()
+                if last_msgs:
+                    chat_history.extend(last_msgs)
+                    _render_loaded_messages(last_msgs)
+                    print(co(C.GREEN, f"  ✓ Auto-resumed last session ({len(last_msgs)} messages)."))
+                else:
+                    sessions = session_list(1)
+                    if sessions:
+                        selected = sessions[0]["id"]
+                        data = session_load(selected)
+                        if data and data.get("messages"):
+                            loaded_msgs = data["messages"]
+                            chat_history.extend(loaded_msgs)
+                            _render_loaded_messages(loaded_msgs)
+                            print(co(C.GREEN, f"  ✓ Auto-resumed last session '{selected[:24]}' ({len(loaded_msgs)} messages)."))
+
             ACTIVE_MESSAGES = chat_history
             run_agent(task, mode=run_mode, max_steps=max_steps_default, chat_history=chat_history)
     finally:
