@@ -371,6 +371,65 @@ def _searxng_search(query: str, max_results: int) -> list[dict] | None:
         return None
 
 
+def _playwright_search(query: str, max_results: int) -> list[dict] | None:
+    """Fallback search using Playwright browser to fetch and render Yahoo Search."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 800},
+                locale="en-US"
+            )
+            page = context.new_page()
+            page.add_init_script("delete Object.getPrototypeOf(navigator).webdriver")
+            
+            # Speed optimization: block images, fonts, and media
+            def block_resources(route):
+                if route.request.resource_type in ["image", "font", "media"]:
+                    route.abort()
+                else:
+                    route.continue_()
+            page.route("**/*", block_resources)
+            page.set_default_timeout(10000)
+            
+            # Go directly to Yahoo search results page
+            search_url = f"https://search.yahoo.com/search?q={quote(query)}"
+            page.goto(search_url, wait_until="domcontentloaded")
+            
+            html_content = page.content()
+            browser.close()
+            
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, "html.parser")
+            
+            results = []
+            for algo in soup.select(".algo")[:max_results]:
+                link = algo.select_one("a[href]")
+                title_el = algo.select_one("h3")
+                snippet_el = algo.select_one(".compText, .compText ~ div")
+                
+                if link and title_el:
+                    url = link.get("href", "")
+                    title = title_el.get_text(strip=True)
+                    snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                    
+                    if url and _validate_url(url):
+                        results.append({"title": title, "url": url, "content": snippet})
+            return results if results else None
+    except Exception:
+        return None
+
+
 # ── Background Warmup (ddgs only — Lite/wikis need no warmup) ──────────────
 
 _warmed = False
@@ -472,6 +531,7 @@ def search_web(query: str, max_results: int = 3, current: bool = True) -> str:
         ("Lite", _lite_search),
         ("SearXNG", _searxng_search),
         ("DDG HTML", _ddg_html_search),
+        ("Playwright Search", _playwright_search),
         ("Wiki", _wiki_search),
     ]
 
