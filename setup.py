@@ -11,7 +11,6 @@ setup(
         "web_search",
         "youtube_utils",
         "providers",
-        "webui",
         "mcp_client",
     ],
     packages=["job_search", "core", "tools", "ui", "benchmark"],
