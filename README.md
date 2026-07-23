@@ -79,7 +79,7 @@ llama-server
 --port 8083   
 --override-tensor 'blk\.(2[0-9]|3[0-9]|4[0-6])\.ffn_(gate_up|down)_exps\.weight=CPU'   
 -b 1024   
--ub 256   
+-ub 1024   
 --cache-type-k q4_0   
 --cache-type-v q4_0   
 --flash-attn on   
@@ -93,9 +93,9 @@ llama-server
 --reasoning auto  
 --no-warmup 
 --n-cpu-moe 19  
--m /path/to/models/Qwen3.6-35B-A3B-UD-IQ2_XXS.gguf  
+-m /path/to/models/Qwen3.6-35B-A3B-Q4-K-M.gguf  
 --no-mmap  
--c 28000  
+-c 64000  
 --n-gpu-layers auto
 ```
 
